@@ -12,6 +12,8 @@ const sans = Outfit({
   subsets: ["latin"],
 });
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: SITE_NAME,
   applicationName: SITE_NAME,

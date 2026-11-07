@@ -2,10 +2,14 @@ import { headers } from "next/headers";
 import { getAuth } from "@/lib/auth";
 
 export async function getSession() {
-  const auth = await getAuth();
-  return auth.api.getSession({
-    headers: await headers(),
-  });
+  try {
+    const auth = await getAuth();
+    return auth.api.getSession({
+      headers: await headers(),
+    });
+  } catch {
+    return null;
+  }
 }
 
 export async function requireUser() {

@@ -16,6 +16,12 @@ export async function getDb(): Promise<AppDb> {
     return cached;
   }
 
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    const { drizzle } = await import("drizzle-orm/sqlite-proxy");
+    cached = drizzle(async () => ({ rows: [] }), { schema });
+    return cached;
+  }
+
   if (process.env.VERCEL) {
     throw new Error(
       "Vercel'de D1 bağla: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_API_TOKEN",
