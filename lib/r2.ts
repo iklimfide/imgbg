@@ -1,9 +1,11 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function required(name: string) {
   const value = process.env[name];
@@ -15,33 +17,11 @@ function required(name: string) {
 
 export function isR2Configured() {
   return Boolean(
-    process.env.R2_BUCKET ||
-      (process.env.R2_ACCOUNT_ID &&
-        process.env.R2_ACCESS_KEY_ID &&
-        process.env.R2_SECRET_ACCESS_KEY),
+    process.env.R2_ACCOUNT_ID &&
+      process.env.R2_ACCESS_KEY_ID &&
+      process.env.R2_SECRET_ACCESS_KEY &&
+      process.env.R2_BUCKET,
   );
-}
-
-type BoundBucket = {
-  put: (
-    key: string,
-    value: Buffer,
-    options?: { httpMetadata?: { contentType?: string } },
-  ) => Promise<unknown>;
-  get: (
-    key: string,
-  ) => Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
-  delete: (key: string) => Promise<unknown>;
-};
-
-async function boundBucket(): Promise<BoundBucket | null> {
-  try {
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const { env } = await getCloudflareContext({ async: true });
-    return (env?.MEDIA_BUCKET as BoundBucket | undefined) ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function client() {
@@ -55,15 +35,14 @@ function client() {
   });
 }
 
+function bucket() {
+  return required("R2_BUCKET");
+}
+
 export async function uploadToR2(key: string, body: Buffer, contentType: string) {
-  const bucket = await boundBucket();
-  if (bucket) {
-    await bucket.put(key, body, { httpMetadata: { contentType } });
-    return;
-  }
   await client().send(
     new PutObjectCommand({
-      Bucket: required("R2_BUCKET"),
+      Bucket: bucket(),
       Key: key,
       Body: body,
       ContentType: contentType,
@@ -71,35 +50,48 @@ export async function uploadToR2(key: string, body: Buffer, contentType: string)
   );
 }
 
-export async function deleteFromR2(key: string) {
-  const bucket = await boundBucket();
-  if (bucket) {
-    await bucket.delete(key);
-    return;
+export async function signedPutUrl(key: string, contentType: string) {
+  return getSignedUrl(
+    client(),
+    new PutObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+      ContentType: contentType,
+    }),
+    { expiresIn: 60 * 10 },
+  );
+}
+
+export async function headFromR2(key: string) {
+  try {
+    const object = await client().send(
+      new HeadObjectCommand({
+        Bucket: bucket(),
+        Key: key,
+      }),
+    );
+    return {
+      size: Number(object.ContentLength ?? 0),
+      contentType: object.ContentType ?? null,
+    };
+  } catch {
+    return null;
   }
+}
+
+export async function deleteFromR2(key: string) {
   await client().send(
     new DeleteObjectCommand({
-      Bucket: required("R2_BUCKET"),
+      Bucket: bucket(),
       Key: key,
     }),
   );
 }
 
 export async function getFromR2(key: string) {
-  const bucket = await boundBucket();
-  if (bucket) {
-    const object = await bucket.get(key);
-    if (!object) {
-      return { stream: null, contentType: null };
-    }
-    return {
-      stream: object.body,
-      contentType: object.httpMetadata?.contentType ?? null,
-    };
-  }
   const object = await client().send(
     new GetObjectCommand({
-      Bucket: required("R2_BUCKET"),
+      Bucket: bucket(),
       Key: key,
     }),
   );

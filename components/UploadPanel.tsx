@@ -34,15 +34,17 @@ type UploadJson = {
   deleteToken?: string;
 };
 
-function uploadWithXhr(
-  data: FormData,
+function putWithXhr(
+  url: string,
+  file: File,
   onProgress: (loaded: number, total: number) => void,
   assignXhr: (xhr: XMLHttpRequest | null) => void,
 ) {
-  return new Promise<UploadJson>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     assignXhr(xhr);
-    xhr.open("POST", "/api/upload");
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress(event.loaded, event.total);
@@ -50,16 +52,11 @@ function uploadWithXhr(
     };
     xhr.onload = () => {
       assignXhr(null);
-      try {
-        const json = JSON.parse(xhr.responseText) as UploadJson;
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(json);
-          return;
-        }
-        reject(json);
-      } catch {
-        reject({ error: "Yanıt okunamadı." });
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
       }
+      reject({ error: "R2 yüklemesi başarısız." });
     };
     xhr.onerror = () => {
       assignXhr(null);
@@ -69,7 +66,7 @@ function uploadWithXhr(
       assignXhr(null);
       reject({ error: "abort" });
     };
-    xhr.send(data);
+    xhr.send(file);
   });
 }
 
@@ -298,16 +295,34 @@ export function UploadPanel({
         continue;
       }
       const item = queue[index];
-      const data = new FormData();
-      data.set("file", item.file);
-      data.set("kind", kind);
-      data.set("ttl", ttl);
-      if (protect && password.trim()) {
-        data.set("password", password.trim());
-      }
       try {
-        const json = await uploadWithXhr(
-          data,
+        const prepared = (await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind,
+            ttl,
+            name: item.file.name,
+            size: item.file.size,
+            mime: item.file.type,
+          }),
+        }).then(async (response) => {
+          const json = (await response.json()) as UploadJson & { putUrl?: string };
+          if (!response.ok) {
+            throw json;
+          }
+          return json;
+        })) as UploadJson & { putUrl?: string; kod?: string };
+
+        if (!prepared.putUrl || !prepared.kod) {
+          failures.push(`${item.file.name}: ${prepared.error ?? "yüklenemedi"}`);
+          index += 1;
+          continue;
+        }
+
+        await putWithXhr(
+          prepared.putUrl,
+          item.file,
           (loaded, total) => {
             const ratio = total > 0 ? loaded / total : 0;
             setLoadedBytes(doneBytes + item.file.size * ratio);
@@ -316,6 +331,27 @@ export function UploadPanel({
             xhrRef.current = xhr;
           },
         );
+
+        const json = (await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            step: "complete",
+            kod: prepared.kod,
+            kind,
+            ttl,
+            password: protect ? password.trim() : "",
+            name: item.file.name,
+            mime: item.file.type,
+          }),
+        }).then(async (response) => {
+          const payload = (await response.json()) as UploadJson;
+          if (!response.ok) {
+            throw payload;
+          }
+          return payload;
+        })) as UploadJson;
+
         if (!json.kod || !json.deleteToken) {
           failures.push(`${item.file.name}: ${json.error ?? "yüklenemedi"}`);
           index += 1;
