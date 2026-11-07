@@ -4,7 +4,7 @@ import { getAuth } from "@/lib/auth";
 export async function getSession() {
   try {
     const auth = await getAuth();
-    return auth.api.getSession({
+    return await auth.api.getSession({
       headers: await headers(),
     });
   } catch {

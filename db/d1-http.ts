@@ -1,16 +1,32 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { drizzle, type SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import * as schema from "./schema";
 
 type RawResponse = {
   success?: boolean;
-  errors?: { message?: string }[];
-  result?: { results?: { rows?: unknown[][] } }[];
+  errors?: { code?: number; message?: string }[];
+  result?: {
+    results?: { columns?: string[]; rows?: unknown[][] } | unknown[];
+    meta?: unknown;
+  }[];
 };
 
+function env(name: string) {
+  return process.env[name]?.trim() ?? "";
+}
+
+function d1Error(status: number, json: RawResponse) {
+  const item = json.errors?.[0];
+  const detail = item?.message ?? "D1 sorgusu başarısız";
+  const code = item?.code ? ` ${item.code}` : "";
+  return new Error(`D1_${status}${code}: ${detail}`);
+}
+
 async function d1Raw(sql: string, params: unknown[]) {
-  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
-  const token = process.env.CLOUDFLARE_API_TOKEN;
+  const account = env("CLOUDFLARE_ACCOUNT_ID");
+  const databaseId = env("CLOUDFLARE_D1_DATABASE_ID");
+  const token = env("CLOUDFLARE_API_TOKEN");
   if (!account || !databaseId || !token) {
     throw new Error("D1 env eksik: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_API_TOKEN");
   }
@@ -27,9 +43,35 @@ async function d1Raw(sql: string, params: unknown[]) {
   );
   const json = (await response.json()) as RawResponse;
   if (!response.ok || !json.success) {
-    throw new Error(json.errors?.[0]?.message ?? "D1 sorgusu başarısız");
+    throw d1Error(response.status, json);
   }
-  return json.result?.[0]?.results?.rows ?? [];
+  const results = json.result?.[0]?.results;
+  if (results && typeof results === "object" && "rows" in results && Array.isArray(results.rows)) {
+    return results.rows;
+  }
+  return [];
+}
+
+export async function pingD1() {
+  await d1Raw("SELECT 1", []);
+}
+
+export async function ensureD1Schema() {
+  const existing = await d1Raw(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'",
+    [],
+  );
+  if (existing.length > 0) {
+    return;
+  }
+  const sql = readFileSync(join(process.cwd(), "drizzle", "0001_init.sql"), "utf8");
+  const statements = sql
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  for (const statement of statements) {
+    await d1Raw(statement, []);
+  }
 }
 
 export function createD1Db(): SqliteRemoteDatabase<typeof schema> {
@@ -41,6 +83,6 @@ export function createD1Db(): SqliteRemoteDatabase<typeof schema> {
       }
       return { rows };
     },
-    { schema },
+    { schema, logger: false },
   );
 }

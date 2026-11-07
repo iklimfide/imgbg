@@ -47,12 +47,21 @@ function resolveMime(mime: string | undefined, name: string) {
   return ALLOWED_TYPES[hint] ? hint : mimeFromFileName(name);
 }
 
+function jsonError(code: string, error: string, status = 400) {
+  return Response.json({ error, code, status }, { status });
+}
+
+function failMessage(cause: unknown) {
+  return cause instanceof Error ? cause.message : "Yükleme başarısız.";
+}
+
 export async function POST(request: Request) {
   try {
     if (!isR2Configured()) {
-      return Response.json(
-        { error: "Cloudflare R2 henüz ayarlanmadı. Vercel env içine R2 anahtarlarını yaz." },
-        { status: 503 },
+      return jsonError(
+        "R2_ENV",
+        "Cloudflare R2 henüz ayarlanmadı. Vercel env içine R2 anahtarlarını yaz.",
+        503,
       );
     }
 
@@ -65,20 +74,19 @@ export async function POST(request: Request) {
 
     const limitKey = isMember ? `upload:user:${user!.id}` : `upload:guest:${guestKey}`;
     if (!isAdmin && !rateLimit(limitKey, isMember ? 40 : 25, 10 * 60 * 1000)) {
-      return Response.json({ error: "Çok fazla yükleme. Biraz bekleyip tekrar dene." }, { status: 429 });
+      return jsonError("RATE", "Çok fazla yükleme. Biraz bekleyip tekrar dene.", 429);
     }
 
     const body = (await request.json().catch(() => null)) as PrepareBody | null;
     if (!body) {
-      return Response.json({ error: "İstek okunamadı." }, { status: 400 });
+      return jsonError("BAD_JSON", "İstek okunamadı.");
     }
     if (body.step === "complete") {
-      return completeUpload(body, ctx);
+      return await completeUpload(body, ctx);
     }
-    return prepareUpload(body, ctx);
+    return await prepareUpload(body, ctx);
   } catch (cause) {
-    const message = cause instanceof Error ? cause.message : "Yükleme başarısız.";
-    return Response.json({ error: message }, { status: 500 });
+    return jsonError("UPLOAD_500", failMessage(cause), 500);
   }
 }
 
@@ -88,85 +96,87 @@ async function prepareUpload(body: PrepareBody, ctx: Ctx) {
   const meta = ALLOWED_TYPES[mimeHint];
   const size = Number(body.size ?? 0);
   if (!meta || meta.type !== kind) {
-    return Response.json({ error: "Bu dosya bu sekmeye uygun değil." }, { status: 400 });
+    return jsonError("MIME", `Bu dosya bu sekmeye uygun değil. (${mimeHint || "boş tür"})`);
   }
   const maxBytes = fileLimit(ctx.isMember, meta.type, ctx.isAdmin);
   if (Number.isFinite(maxBytes) && size > maxBytes) {
-    return Response.json(
-      { error: `Dosya boyutunuz çok büyük. İzin verilen ${formatMb(maxBytes)}MB` },
-      { status: 400 },
-    );
+    return jsonError("SIZE", `Dosya boyutunuz çok büyük. İzin verilen ${formatMb(maxBytes)}MB`);
   }
   const used = await usedStorage(
     ctx.isMember ? { userId: ctx.user!.id } : { guestKey: ctx.guestKey! },
   ).catch(() => 0);
   const cap = storageLimit(ctx.isMember, ctx.isAdmin);
   if (Number.isFinite(cap) && used + size > cap) {
-    return Response.json({ error: "Depolama dolu." }, { status: 400 });
+    return jsonError("QUOTA", "Depolama dolu.");
   }
 
-  const kod = await createShortCode();
-  const folder = ctx.isMember ? ctx.user!.id : `guest/${ctx.guestKey}`;
-  const r2Key = `uploads/${folder}/${kod}.${meta.ext}`;
-  await ensureR2Cors();
-  const putUrl = await signedPutUrl(r2Key, mimeHint);
-  return Response.json({ kod, r2Key, putUrl, mime: mimeHint, ext: meta.ext });
+  try {
+    const kod = await createShortCode();
+    const folder = ctx.isMember ? ctx.user!.id : `guest/${ctx.guestKey}`;
+    const r2Key = `uploads/${folder}/${kod}.${meta.ext}`;
+    await ensureR2Cors();
+    const putUrl = await signedPutUrl(r2Key, mimeHint);
+    return Response.json({ kod, r2Key, putUrl, mime: mimeHint, ext: meta.ext });
+  } catch (cause) {
+    return jsonError("PREPARE", failMessage(cause), 500);
+  }
 }
 
 async function completeUpload(body: PrepareBody, ctx: Ctx) {
   const kod = String(body.kod ?? "");
   if (!/^[a-z0-9]{8}$/.test(kod)) {
-    return Response.json({ error: "Kod geçersiz." }, { status: 400 });
+    return jsonError("KOD", "Kod geçersiz.");
   }
   const kind = parseMediaKind(body.kind ?? "image");
   const mimeHint = resolveMime(body.mime, String(body.name ?? ""));
   const meta = ALLOWED_TYPES[mimeHint];
   if (!meta || meta.type !== kind) {
-    return Response.json({ error: "Bu dosya bu sekmeye uygun değil." }, { status: 400 });
+    return jsonError("MIME", `Bu dosya bu sekmeye uygun değil. (${mimeHint || "boş tür"})`);
   }
   const ttl = typeof body.ttl === "string" ? body.ttl : "1d";
   const password = typeof body.password === "string" ? body.password.trim() : "";
   if (password && (password.length < 4 || password.length > 64)) {
-    return Response.json({ error: "Şifre 4-64 karakter olmalı." }, { status: 400 });
+    return jsonError("PASSWORD", "Şifre 4-64 karakter olmalı.");
   }
 
   const folder = ctx.isMember ? ctx.user!.id : `guest/${ctx.guestKey}`;
   const r2Key = `uploads/${folder}/${kod}.${meta.ext}`;
   const head = await headFromR2(r2Key);
   if (!head || head.size < 1) {
-    return Response.json({ error: "Dosya R2'ye yazılamadı." }, { status: 400 });
+    return jsonError("R2_HEAD", "Dosya R2'ye yazılamadı.");
   }
 
   const maxBytes = fileLimit(ctx.isMember, meta.type, ctx.isAdmin);
   if (Number.isFinite(maxBytes) && head.size > maxBytes) {
-    return Response.json(
-      { error: `Dosya boyutunuz çok büyük. İzin verilen ${formatMb(maxBytes)}MB` },
-      { status: 400 },
-    );
+    return jsonError("SIZE", `Dosya boyutunuz çok büyük. İzin verilen ${formatMb(maxBytes)}MB`);
   }
 
-  const expiresAt = resolveExpiry(ctx.isMember, ttl, meta.type);
-  const db = await getDb();
-  await db.insert(posts).values({
-    id: kod,
-    userId: ctx.user?.id ?? null,
-    guestKey: ctx.guestKey,
-    type: meta.type,
-    r2Key,
-    mime: mimeHint,
-    size: head.size,
-    originalName: typeof body.name === "string" ? body.name : null,
-    passwordHash: password ? hashSharePassword(password) : null,
-    expiresAt,
-    createdAt: new Date(),
-  });
+  try {
+    const expiresAt = resolveExpiry(ctx.isMember, ttl, meta.type);
+    const db = await getDb();
+    await db.insert(posts).values({
+      id: kod,
+      userId: ctx.user?.id ?? null,
+      guestKey: ctx.guestKey,
+      type: meta.type,
+      r2Key,
+      mime: mimeHint,
+      size: head.size,
+      originalName: typeof body.name === "string" ? body.name : null,
+      passwordHash: password ? hashSharePassword(password) : null,
+      expiresAt,
+      createdAt: new Date(),
+    });
 
-  return Response.json({
-    kod,
-    deleteToken: makeDeleteToken(kod),
-    protected: Boolean(password),
-    permanent: !expiresAt,
-    expiresAt: expiresAt?.toISOString() ?? null,
-    ttlLabel: ttlLabel(ctx.isMember || ttl !== "forever" ? ttl : "1y", meta.type),
-  });
+    return Response.json({
+      kod,
+      deleteToken: makeDeleteToken(kod),
+      protected: Boolean(password),
+      permanent: !expiresAt,
+      expiresAt: expiresAt?.toISOString() ?? null,
+      ttlLabel: ttlLabel(ctx.isMember || ttl !== "forever" ? ttl : "1y", meta.type),
+    });
+  } catch (cause) {
+    return jsonError("COMPLETE", failMessage(cause), 500);
+  }
 }

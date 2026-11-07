@@ -11,14 +11,24 @@ export async function getDb(): Promise<AppDb> {
   }
 
   if (process.env.CLOUDFLARE_D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN) {
-    const { createD1Db } = await import("./d1-http");
-    cached = createD1Db();
-    return cached;
+    try {
+      const { createD1Db, pingD1, ensureD1Schema } = await import("./d1-http");
+      await pingD1();
+      await ensureD1Schema();
+      cached = createD1Db();
+      return cached;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "D1 bağlanamadı";
+      if (process.env.VERCEL || process.env.NEXT_PHASE === "phase-production-build") {
+        throw new Error(message);
+      }
+      console.warn(`[db] D1 kullanılamadı (${message}), yerel SQLite'a düşülüyor.`);
+    }
   }
 
   if (process.env.NEXT_PHASE === "phase-production-build") {
     const { drizzle } = await import("drizzle-orm/sqlite-proxy");
-    cached = drizzle(async () => ({ rows: [] }), { schema });
+    cached = drizzle(async () => ({ rows: [] }), { schema, logger: false });
     return cached;
   }
 
@@ -28,6 +38,11 @@ export async function getDb(): Promise<AppDb> {
     );
   }
 
+  cached = await openLocalSqlite();
+  return cached;
+}
+
+async function openLocalSqlite(): Promise<AppDb> {
   const fs = await import("node:fs");
   const path = await import("node:path");
   const { default: Database } = await import("better-sqlite3");
@@ -37,6 +52,7 @@ export async function getDb(): Promise<AppDb> {
   const sqlite = new Database(dbPath);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
-  cached = drizzle(sqlite, { schema }) as unknown as AppDb;
-  return cached;
+  const init = fs.readFileSync(path.join(process.cwd(), "drizzle", "0001_init.sql"), "utf8");
+  sqlite.exec(init);
+  return drizzle(sqlite, { schema, logger: false }) as unknown as AppDb;
 }

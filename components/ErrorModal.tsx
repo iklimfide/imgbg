@@ -17,13 +17,15 @@ export function ErrorModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="error-modal-title"
-        className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl ring-1 ring-red-100 dark:bg-slate-900 dark:ring-red-900/40"
+        className="w-full max-w-lg rounded-3xl bg-white p-6 text-left shadow-2xl ring-1 ring-red-100 dark:bg-slate-900 dark:ring-red-900/40"
         onClick={(event) => event.stopPropagation()}
       >
         <p id="error-modal-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
           Hata
         </p>
-        <p className="mt-4 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+          {message}
+        </p>
         <button
           type="button"
           onClick={onClose}

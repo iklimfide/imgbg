@@ -28,32 +28,61 @@ type QueueItem = {
 type UploadJson = {
   kod?: string;
   error?: string;
+  code?: string;
+  status?: number;
   permanent?: boolean;
   ttlLabel?: string;
   protected?: boolean;
   deleteToken?: string;
 };
 
-function failMessage(cause: unknown) {
-  if (cause && typeof cause === "object" && "error" in cause && typeof cause.error === "string") {
-    return cause.error;
-  }
-  if (cause instanceof Error && cause.message) {
-    return cause.message;
-  }
-  return "yüklenemedi";
+function htmlHint(status: number, text: string) {
+  const title = text.match(/<title>([^<]+)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim();
+  const fn = text.match(/\b(FUNCTION_[A-Z0-9_]+|EDGE_FUNCTION_[A-Z0-9_]+|NO_RESPONSE_FROM_FUNCTION)\b/)?.[1];
+  const digest = text.match(/\bDIGEST:?\s*([a-z0-9]+)/i)?.[1];
+  const plain = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140);
+  return [`HTTP ${status}`, fn, digest, title || plain].filter(Boolean).join(" · ");
 }
 
-async function readJson<T extends UploadJson>(response: Response) {
+function failMessage(cause: unknown, step?: string) {
+  const parts: string[] = [];
+  if (step) {
+    parts.push(step);
+  }
+  if (cause && typeof cause === "object") {
+    const row = cause as UploadJson;
+    if (typeof row.status === "number") {
+      parts.push(`HTTP ${row.status}`);
+    }
+    if (typeof row.code === "string" && row.code !== step) {
+      parts.push(row.code);
+    }
+    if (typeof row.error === "string" && row.error) {
+      parts.push(row.error);
+    }
+  } else if (cause instanceof Error && cause.message) {
+    parts.push(cause.message);
+  }
+  if (parts.length <= (step ? 1 : 0)) {
+    parts.push("yüklenemedi");
+  }
+  return parts.join(" · ");
+}
+
+async function readJson<T extends UploadJson>(response: Response, step: string) {
   const text = await response.text();
   let payload: T;
   try {
     payload = JSON.parse(text) as T;
   } catch {
-    throw { error: `Sunucu ${response.status}` };
+    throw { error: htmlHint(response.status, text), code: step, status: response.status };
   }
   if (!response.ok) {
-    throw payload;
+    throw {
+      error: payload.error || htmlHint(response.status, text),
+      code: payload.code || step,
+      status: payload.status || response.status,
+    };
   }
   return payload;
 }
@@ -81,12 +110,12 @@ function putWithXhr(
         resolve();
         return;
       }
-      const hint = (xhr.responseText || "").replace(/\s+/g, " ").slice(0, 80);
-      reject({ error: hint || `R2 yüklemesi başarısız (${xhr.status}).` });
+      const hint = (xhr.responseText || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 120);
+      reject({ error: hint || "R2 yüklemesi başarısız.", code: "R2_PUT", status: xhr.status });
     };
     xhr.onerror = () => {
       assignXhr(null);
-      reject({ error: "R2 bağlantısı reddedildi (CORS)." });
+      reject({ error: "R2 bağlantısı reddedildi (CORS).", code: "R2_CORS", status: 0 });
     };
     xhr.onabort = () => {
       assignXhr(null);
@@ -334,6 +363,7 @@ export function UploadPanel({
               mime: item.file.type,
             }),
           }),
+          "PREPARE",
         );
 
         if (!prepared.putUrl || !prepared.kod) {
@@ -368,6 +398,7 @@ export function UploadPanel({
               mime,
             }),
           }),
+          "COMPLETE",
         );
 
         if (!json.kod || !json.deleteToken) {
@@ -393,14 +424,13 @@ export function UploadPanel({
         setLoadedBytes(doneBytes);
         index += 1;
       } catch (cause) {
-        const message = failMessage(cause);
-        if (message === "abort") {
+        if (cause && typeof cause === "object" && "error" in cause && cause.error === "abort") {
           if (actionRef.current === "cancel") {
             break;
           }
           continue;
         }
-        failures.push(`${item.file.name}: ${message ?? "yüklenemedi"}`);
+        failures.push(`${item.file.name}: ${failMessage(cause)}`);
         index += 1;
       }
     }
@@ -422,7 +452,7 @@ export function UploadPanel({
       setError(
         sizeError
           ? `Dosya boyutunuz çok büyük. İzin verilen ${formatMb(fileLimit(member, kind))}MB`
-          : failures.join(" "),
+          : failures.join("\n"),
       );
     }
     actionRef.current = null;
