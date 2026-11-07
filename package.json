@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:push": "drizzle-kit push",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "cf-build": "opennextjs-cloudflare build",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
