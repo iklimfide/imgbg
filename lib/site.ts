@@ -26,6 +26,7 @@ export type MediaKind = "image" | "video" | "audio";
 
 export const ALLOWED_TYPES: Record<string, { type: MediaKind; ext: string }> = {
   "image/jpeg": { type: "image", ext: "jpg" },
+  "image/jpg": { type: "image", ext: "jpg" },
   "image/png": { type: "image", ext: "png" },
   "image/webp": { type: "image", ext: "webp" },
   "image/gif": { type: "image", ext: "gif" },
@@ -45,11 +46,17 @@ export const ALLOWED_TYPES: Record<string, { type: MediaKind; ext: string }> = {
 };
 
 const EXT_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  mp4: "video/mp4",
+  webm: "video/webm",
   mp3: "audio/mpeg",
   wav: "audio/wav",
   ogg: "audio/ogg",
   oga: "audio/ogg",
-  webm: "audio/webm",
   m4a: "audio/mp4",
   aac: "audio/aac",
   flac: "audio/flac",

@@ -34,6 +34,57 @@ type UploadJson = {
   deleteToken?: string;
 };
 
+const DIRECT_MIN_BYTES = 3.8 * 1024 * 1024;
+
+function failMessage(cause: unknown) {
+  if (cause && typeof cause === "object" && "error" in cause && typeof cause.error === "string") {
+    return cause.error;
+  }
+  if (cause instanceof Error && cause.message) {
+    return cause.message;
+  }
+  return "yüklenemedi";
+}
+
+function uploadWithXhr(
+  data: FormData,
+  onProgress: (loaded: number, total: number) => void,
+  assignXhr: (xhr: XMLHttpRequest | null) => void,
+) {
+  return new Promise<UploadJson>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    assignXhr(xhr);
+    xhr.open("POST", "/api/upload");
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(event.loaded, event.total);
+      }
+    };
+    xhr.onload = () => {
+      assignXhr(null);
+      try {
+        const json = JSON.parse(xhr.responseText) as UploadJson;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(json);
+          return;
+        }
+        reject(json);
+      } catch {
+        reject({ error: "Yanıt okunamadı." });
+      }
+    };
+    xhr.onerror = () => {
+      assignXhr(null);
+      reject({ error: "Bağlantı hatası." });
+    };
+    xhr.onabort = () => {
+      assignXhr(null);
+      reject({ error: "abort" });
+    };
+    xhr.send(data);
+  });
+}
+
 function putWithXhr(
   url: string,
   file: File,
@@ -296,61 +347,83 @@ export function UploadPanel({
       }
       const item = queue[index];
       try {
-        const prepared = (await fetch("/api/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            kind,
-            ttl,
-            name: item.file.name,
-            size: item.file.size,
-            mime: item.file.type,
-          }),
-        }).then(async (response) => {
-          const json = (await response.json()) as UploadJson & { putUrl?: string };
-          if (!response.ok) {
-            throw json;
+        let json: UploadJson;
+        if (item.file.size <= DIRECT_MIN_BYTES) {
+          const data = new FormData();
+          data.set("file", item.file);
+          data.set("kind", kind);
+          data.set("ttl", ttl);
+          if (protect && password.trim()) {
+            data.set("password", password.trim());
           }
-          return json;
-        })) as UploadJson & { putUrl?: string; kod?: string };
+          json = await uploadWithXhr(
+            data,
+            (loaded, total) => {
+              const ratio = total > 0 ? loaded / total : 0;
+              setLoadedBytes(doneBytes + item.file.size * ratio);
+            },
+            (xhr) => {
+              xhrRef.current = xhr;
+            },
+          );
+        } else {
+          const prepared = (await fetch("/api/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              kind,
+              ttl,
+              name: item.file.name,
+              size: item.file.size,
+              mime: item.file.type,
+            }),
+          }).then(async (response) => {
+            const payload = (await response.json()) as UploadJson & { putUrl?: string; mime?: string };
+            if (!response.ok) {
+              throw payload;
+            }
+            return payload;
+          })) as UploadJson & { putUrl?: string; mime?: string; kod?: string };
 
-        if (!prepared.putUrl || !prepared.kod) {
-          failures.push(`${item.file.name}: ${prepared.error ?? "yüklenemedi"}`);
-          index += 1;
-          continue;
+          if (!prepared.putUrl || !prepared.kod) {
+            throw { error: prepared.error ?? "yüklenemedi" };
+          }
+
+          const typed = prepared.mime
+            ? new File([item.file], item.file.name, { type: prepared.mime })
+            : item.file;
+          await putWithXhr(
+            prepared.putUrl,
+            typed,
+            (loaded, total) => {
+              const ratio = total > 0 ? loaded / total : 0;
+              setLoadedBytes(doneBytes + item.file.size * ratio);
+            },
+            (xhr) => {
+              xhrRef.current = xhr;
+            },
+          );
+
+          json = (await fetch("/api/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              step: "complete",
+              kod: prepared.kod,
+              kind,
+              ttl,
+              password: protect ? password.trim() : "",
+              name: item.file.name,
+              mime: prepared.mime || item.file.type,
+            }),
+          }).then(async (response) => {
+            const payload = (await response.json()) as UploadJson;
+            if (!response.ok) {
+              throw payload;
+            }
+            return payload;
+          })) as UploadJson;
         }
-
-        await putWithXhr(
-          prepared.putUrl,
-          item.file,
-          (loaded, total) => {
-            const ratio = total > 0 ? loaded / total : 0;
-            setLoadedBytes(doneBytes + item.file.size * ratio);
-          },
-          (xhr) => {
-            xhrRef.current = xhr;
-          },
-        );
-
-        const json = (await fetch("/api/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            step: "complete",
-            kod: prepared.kod,
-            kind,
-            ttl,
-            password: protect ? password.trim() : "",
-            name: item.file.name,
-            mime: item.file.type,
-          }),
-        }).then(async (response) => {
-          const payload = (await response.json()) as UploadJson;
-          if (!response.ok) {
-            throw payload;
-          }
-          return payload;
-        })) as UploadJson;
 
         if (!json.kod || !json.deleteToken) {
           failures.push(`${item.file.name}: ${json.error ?? "yüklenemedi"}`);
@@ -375,7 +448,7 @@ export function UploadPanel({
         setLoadedBytes(doneBytes);
         index += 1;
       } catch (cause) {
-        const message = (cause as UploadJson)?.error;
+        const message = failMessage(cause);
         if (message === "abort") {
           if (actionRef.current === "cancel") {
             break;
