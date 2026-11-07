@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🚀 imgbg.net — Fast, Ephemeral & Lightweight Media Sharing Platform
 
-## Getting Started
+[![Live Demo](https://img.shields.io/badge/Live_Site-imgbg.net-0070f3?style=for-the-badge&logo=cloudflare&logoColor=white)](https://imgbg.net)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-First, run the development server:
+**[imgbg.net](https://imgbg.net)** is a minimalist, fast, and ephemeral media sharing platform designed for seamless upload and sharing of **images, videos, and audio files**. 
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Built with zero-cost infrastructure in mind, it provides a frictionless "load and share" experience with automated content self-deletion, media-attached notes, and visitor comments.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+🌐 **Try it live:** [https://imgbg.net](https://imgbg.net)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## ✨ Features
 
-## Learn More
+* ⚡ **Instant Uploads:** Drag-and-drop or paste media (images, videos, audio) with zero friction.
+* ⏳ **Ephemeral Storage:** Automatic self-deletion based on customizable expiration lifecycles.
+* 📝 **Media-Attached Notes:** Add optional descriptions or messages directly to shared media.
+* 💬 **Interactive Comments:** Visitor comment section under shared view pages (`/v/xyz`).
+* 🔒 **Passwordless Auth:** Powered by Supabase Auth (Google OAuth / Magic Link) strictly for upload history management.
+* 🚫 **Ad-Supported View Pages:** Keep the upload interface 100% clean and ad-free while monetizing view landing pages.
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🛠️ Architecture & Tech Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The platform is designed for maximum speed, unlimited bandwidth, and near-zero running costs:
 
-## Deploy on Vercel
+* **Frontend & Edge Backend:** [Cloudflare Pages](https://pages.cloudflare.com/) & [Cloudflare Workers](https://workers.cloudflare.com/)
+* **Media Storage:** [Cloudflare R2](https://www.cloudflare.com/developer-platform/r2/) (Direct client upload via Pre-signed URLs & Lifecycle auto-deletion rules)
+* **Authentication & User History:** [Supabase Auth](https://supabase.com/)
+* **Domain & DNS:** Registered at **[imgbg.net](https://imgbg.net)** via Cloudflare infrastructure.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🔗 Official Links & Resources
+
+* **Main Application:** [https://imgbg.net](https://imgbg.net)
+* **Upload Media:** [https://imgbg.net](https://imgbg.net)
+* **Report Issues / Feedback:** Feel free to open an issue or pull request in this repository!
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<p align="center">
+  Developed with ❤️ for fast, anonymous, and ephemeral content delivery at <b><a href="https://imgbg.net">imgbg.net</a></b>.
+</p>
