@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  PutBucketCorsCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -32,11 +33,40 @@ function client() {
       accessKeyId: required("R2_ACCESS_KEY_ID"),
       secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
     },
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
 }
 
 function bucket() {
   return required("R2_BUCKET");
+}
+
+let corsReady: Promise<void> | null = null;
+
+export function ensureR2Cors() {
+  corsReady ??= client()
+    .send(
+      new PutBucketCorsCommand({
+        Bucket: bucket(),
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedOrigins: ["*"],
+              AllowedMethods: ["GET", "PUT", "HEAD"],
+              AllowedHeaders: ["*"],
+              ExposeHeaders: ["ETag", "Content-Length"],
+              MaxAgeSeconds: 86400,
+            },
+          ],
+        },
+      }),
+    )
+    .then(() => undefined)
+    .catch(() => {
+      corsReady = null;
+    });
+  return corsReady;
 }
 
 export async function uploadToR2(key: string, body: Buffer, contentType: string) {

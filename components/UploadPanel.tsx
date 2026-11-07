@@ -34,8 +34,6 @@ type UploadJson = {
   deleteToken?: string;
 };
 
-const DIRECT_MIN_BYTES = 3.8 * 1024 * 1024;
-
 function failMessage(cause: unknown) {
   if (cause && typeof cause === "object" && "error" in cause && typeof cause.error === "string") {
     return cause.error;
@@ -46,48 +44,24 @@ function failMessage(cause: unknown) {
   return "yüklenemedi";
 }
 
-function uploadWithXhr(
-  data: FormData,
-  onProgress: (loaded: number, total: number) => void,
-  assignXhr: (xhr: XMLHttpRequest | null) => void,
-) {
-  return new Promise<UploadJson>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    assignXhr(xhr);
-    xhr.open("POST", "/api/upload");
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        onProgress(event.loaded, event.total);
-      }
-    };
-    xhr.onload = () => {
-      assignXhr(null);
-      try {
-        const json = JSON.parse(xhr.responseText) as UploadJson;
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(json);
-          return;
-        }
-        reject(json);
-      } catch {
-        reject({ error: "Yanıt okunamadı." });
-      }
-    };
-    xhr.onerror = () => {
-      assignXhr(null);
-      reject({ error: "Bağlantı hatası." });
-    };
-    xhr.onabort = () => {
-      assignXhr(null);
-      reject({ error: "abort" });
-    };
-    xhr.send(data);
-  });
+async function readJson<T extends UploadJson>(response: Response) {
+  const text = await response.text();
+  let payload: T;
+  try {
+    payload = JSON.parse(text) as T;
+  } catch {
+    throw { error: `Sunucu ${response.status}` };
+  }
+  if (!response.ok) {
+    throw payload;
+  }
+  return payload;
 }
 
 function putWithXhr(
   url: string,
   file: File,
+  contentType: string,
   onProgress: (loaded: number, total: number) => void,
   assignXhr: (xhr: XMLHttpRequest | null) => void,
 ) {
@@ -95,7 +69,7 @@ function putWithXhr(
     const xhr = new XMLHttpRequest();
     assignXhr(xhr);
     xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.setRequestHeader("Content-Type", contentType || "application/octet-stream");
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress(event.loaded, event.total);
@@ -107,11 +81,12 @@ function putWithXhr(
         resolve();
         return;
       }
-      reject({ error: "R2 yüklemesi başarısız." });
+      const hint = (xhr.responseText || "").replace(/\s+/g, " ").slice(0, 80);
+      reject({ error: hint || `R2 yüklemesi başarısız (${xhr.status}).` });
     };
     xhr.onerror = () => {
       assignXhr(null);
-      reject({ error: "Bağlantı hatası." });
+      reject({ error: "R2 bağlantısı reddedildi (CORS)." });
     };
     xhr.onabort = () => {
       assignXhr(null);
@@ -347,27 +322,8 @@ export function UploadPanel({
       }
       const item = queue[index];
       try {
-        let json: UploadJson;
-        if (item.file.size <= DIRECT_MIN_BYTES) {
-          const data = new FormData();
-          data.set("file", item.file);
-          data.set("kind", kind);
-          data.set("ttl", ttl);
-          if (protect && password.trim()) {
-            data.set("password", password.trim());
-          }
-          json = await uploadWithXhr(
-            data,
-            (loaded, total) => {
-              const ratio = total > 0 ? loaded / total : 0;
-              setLoadedBytes(doneBytes + item.file.size * ratio);
-            },
-            (xhr) => {
-              xhrRef.current = xhr;
-            },
-          );
-        } else {
-          const prepared = (await fetch("/api/upload", {
+        const prepared = await readJson<UploadJson & { putUrl?: string; mime?: string; kod?: string }>(
+          await fetch("/api/upload", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -377,34 +333,29 @@ export function UploadPanel({
               size: item.file.size,
               mime: item.file.type,
             }),
-          }).then(async (response) => {
-            const payload = (await response.json()) as UploadJson & { putUrl?: string; mime?: string };
-            if (!response.ok) {
-              throw payload;
-            }
-            return payload;
-          })) as UploadJson & { putUrl?: string; mime?: string; kod?: string };
+          }),
+        );
 
-          if (!prepared.putUrl || !prepared.kod) {
-            throw { error: prepared.error ?? "yüklenemedi" };
-          }
+        if (!prepared.putUrl || !prepared.kod) {
+          throw { error: prepared.error ?? "yüklenemedi" };
+        }
 
-          const typed = prepared.mime
-            ? new File([item.file], item.file.name, { type: prepared.mime })
-            : item.file;
-          await putWithXhr(
-            prepared.putUrl,
-            typed,
-            (loaded, total) => {
-              const ratio = total > 0 ? loaded / total : 0;
-              setLoadedBytes(doneBytes + item.file.size * ratio);
-            },
-            (xhr) => {
-              xhrRef.current = xhr;
-            },
-          );
+        const mime = prepared.mime || item.file.type || "application/octet-stream";
+        await putWithXhr(
+          prepared.putUrl,
+          item.file,
+          mime,
+          (loaded, total) => {
+            const ratio = total > 0 ? loaded / total : 0;
+            setLoadedBytes(doneBytes + item.file.size * ratio);
+          },
+          (xhr) => {
+            xhrRef.current = xhr;
+          },
+        );
 
-          json = (await fetch("/api/upload", {
+        const json = await readJson<UploadJson>(
+          await fetch("/api/upload", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -414,16 +365,10 @@ export function UploadPanel({
               ttl,
               password: protect ? password.trim() : "",
               name: item.file.name,
-              mime: prepared.mime || item.file.type,
+              mime,
             }),
-          }).then(async (response) => {
-            const payload = (await response.json()) as UploadJson;
-            if (!response.ok) {
-              throw payload;
-            }
-            return payload;
-          })) as UploadJson;
-        }
+          }),
+        );
 
         if (!json.kod || !json.deleteToken) {
           failures.push(`${item.file.name}: ${json.error ?? "yüklenemedi"}`);
