@@ -22,11 +22,7 @@ export async function Header() {
           />
           <span className="truncate text-base font-semibold text-slate-800 dark:text-white">{SITE_NAME}</span>
         </Link>
-        <HeaderMenu
-          signedIn={Boolean(session?.user)}
-          isAdmin={isAdminEmail(session?.user?.email)}
-          name={session?.user?.name ?? ""}
-        />
+        <HeaderMenu signedIn={Boolean(session?.user)} isAdmin={isAdminEmail(session?.user?.email)} />
       </div>
     </header>
   );

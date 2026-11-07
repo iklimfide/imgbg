@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+
+initOpenNextCloudflareForDev();
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3", "sharp"],
   experimental: {
-    proxyClientMaxBodySize: "110mb",
+    proxyClientMaxBodySize: "100mb",
   },
   turbopack: {
     rules: {

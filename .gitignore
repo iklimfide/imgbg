@@ -40,8 +40,10 @@ yarn-error.log*
 /data/*.db-wal
 /data/*.db-shm
 
-# vercel
+# vercel / cloudflare
 .vercel
+.open-next
+.wrangler
 
 # typescript
 *.tsbuildinfo

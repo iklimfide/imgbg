@@ -1,4 +1,5 @@
 import { getSession } from "@/lib/session";
+import { loginToEmail } from "@/lib/username";
 
 export function isAdminEmail(email?: string | null) {
   if (!email) {
@@ -8,7 +9,8 @@ export function isAdminEmail(email?: string | null) {
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
-  return allowed.includes(email.trim().toLowerCase());
+  const value = email.trim().toLowerCase();
+  return allowed.some((item) => item === value || loginToEmail(item) === value);
 }
 
 export async function requireAdmin() {

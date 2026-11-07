@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { BulkShareCodes, ShareCodes } from "@/components/ShareCodes";
 import { mediaShareUrl } from "@/lib/share-codes";
 
@@ -28,6 +29,7 @@ export function ShareSuccessModal({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [enlarged, setEnlarged] = useState<ShareResult | null>(null);
+  const [askDelete, setAskDelete] = useState<ShareResult | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -64,6 +66,7 @@ export function ShareSuccessModal({
       body: JSON.stringify({ token: item.deleteToken }),
     });
     setBusy(null);
+    setAskDelete(null);
     if (response.ok) {
       onDeleted(item.kod);
     }
@@ -126,24 +129,23 @@ export function ShareSuccessModal({
                       aria-label="Resmi büyüt"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={item.preview} alt={item.name} className="h-full w-full object-cover" />
+                      <img src={item.preview} alt="" className="h-full w-full object-cover" />
                     </button>
                   )}
                   <button
                     type="button"
                     disabled={busy === item.kod}
-                    onClick={() => void remove(item)}
+                    onClick={() => setAskDelete(item)}
                     className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 px-4 py-1.5 text-base font-bold text-red-600 shadow-lg hover:bg-white disabled:opacity-60"
                   >
                     {busy === item.kod ? "Siliniyor..." : "Sil"}
                   </button>
                 </div>
                 <div className="flex min-w-0 flex-col justify-center space-y-2">
-                  <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{item.name}</p>
                   <ShareCodes
                     pageUrl={item.url}
                     mediaUrl={mediaShareUrl(item.url, item.kod)}
-                    name={item.name}
+                    name={item.kod}
                     kind={item.kind}
                   />
                 </div>
@@ -153,6 +155,17 @@ export function ShareSuccessModal({
           </>
         )}
       </div>
+      <ConfirmModal
+        open={Boolean(askDelete)}
+        message="Bu paylaşımı silmek istiyor musun?"
+        pending={Boolean(busy)}
+        onCancel={() => setAskDelete(null)}
+        onConfirm={() => {
+          if (askDelete) {
+            void remove(askDelete);
+          }
+        }}
+      />
       {enlarged && enlarged.kind === "image" ? (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/80 p-4"
@@ -164,7 +177,7 @@ export function ShareSuccessModal({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={enlarged.preview}
-            alt={enlarged.name}
+            alt=""
             className="max-h-[90vh] max-w-full rounded-2xl object-contain shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           />

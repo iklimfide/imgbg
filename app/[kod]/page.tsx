@@ -1,12 +1,10 @@
-import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { ShareCodes } from "@/components/ShareCodes";
 import { MediaView } from "@/components/MediaView";
+import { SharePromo } from "@/components/SharePromo";
 import { UnlockForm } from "@/components/UnlockForm";
-import { db } from "@/db";
-import { user } from "@/db/schema";
 import { isAdminEmail } from "@/lib/admin";
-import { getLivePost, getPost, isExpired } from "@/lib/posts";
+import { getLivePost, getPost, incrementViews, isExpired } from "@/lib/posts";
 import { getSession } from "@/lib/session";
 import { asShareKind, getSiteUrl, shareUrl } from "@/lib/site";
 import { hasUnlocked } from "@/lib/unlock";
@@ -40,29 +38,26 @@ export default async function PaylasimPage({
     return <UnlockForm kod={kod} />;
   }
 
-  const [owner] = post.userId
-    ? await db.select().from(user).where(eq(user.id, post.userId)).limit(1)
-    : [null];
+  if (!adminOnly && !isOwner) {
+    await incrementViews(kod);
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 sm:space-y-5">
+      <SharePromo />
       <MediaView post={post} />
       {adminOnly ? (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
           Bu paylaşım kullanıcılara kapalı
           {post.deletedAt ? " · silindi" : ""}
+          {post.hiddenAt ? " · gizli" : ""}
           {isExpired(post) ? " · süresi doldu" : ""}. Yalnızca sende görünür.
         </p>
       ) : null}
-      <p className="text-sm text-slate-500 dark:text-slate-400">
-        {owner?.name ?? "Misafir"} paylaştı
-        {post.expiresAt ? " · süreli paylaşım" : " · kalıcı"}
-        {post.passwordHash ? " · şifreli" : ""}
-      </p>
       <ShareCodes
         pageUrl={shareUrl(kod, getSiteUrl())}
         mediaUrl={`${getSiteUrl()}/api/media/${kod}`}
-        name={post.originalName ?? kod}
+        name={kod}
         kind={asShareKind(post.type)}
       />
     </div>

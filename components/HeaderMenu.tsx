@@ -8,11 +8,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 export function HeaderMenu({
   signedIn,
   isAdmin,
-  name,
 }: {
   signedIn: boolean;
   isAdmin: boolean;
-  name: string;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -90,9 +88,16 @@ export function HeaderMenu({
                 <Link
                   href="/profil"
                   onClick={() => setOpen(false)}
-                  className="flex min-h-11 items-center truncate rounded-xl px-3 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                  className="flex min-h-11 items-center rounded-xl px-3 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
-                  {name}
+                  Galerim
+                </Link>
+                <Link
+                  href="/profil/sifre"
+                  onClick={() => setOpen(false)}
+                  className="flex min-h-11 items-center rounded-xl px-3 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Profil ayarları
                 </Link>
                 <div className="px-1">
                   <SignOutButton />

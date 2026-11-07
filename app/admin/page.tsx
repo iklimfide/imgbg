@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { AdminGallery, type AdminPostCard } from "@/components/AdminGallery";
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { posts, user } from "@/db/schema";
 import { isAdminEmail } from "@/lib/admin";
 import { getSession } from "@/lib/session";
@@ -24,6 +24,7 @@ export default async function AdminPage() {
   }
 
   const origin = getSiteUrl();
+  const db = await getDb();
   const items = await db
     .select({
       post: posts,
@@ -44,6 +45,7 @@ export default async function AdminPage() {
     ownerName,
     passwordHash: post.passwordHash,
     deletedAt: iso(post.deletedAt),
+    hiddenAt: iso(post.hiddenAt),
     expiresAt: iso(post.expiresAt),
     createdAt: iso(post.createdAt) ?? new Date().toISOString(),
     pageUrl: shareUrl(post.id, origin),

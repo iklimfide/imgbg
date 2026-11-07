@@ -78,9 +78,11 @@ export const posts = sqliteTable(
     r2Key: text("r2_key").notNull(),
     mime: text("mime").notNull(),
     size: integer("size").notNull(),
+    views: integer("views").notNull().default(0),
     originalName: text("original_name"),
     passwordHash: text("password_hash"),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    hiddenAt: integer("hidden_at", { mode: "timestamp_ms" }),
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
@@ -90,6 +92,7 @@ export const posts = sqliteTable(
     index("posts_userId_idx").on(table.userId),
     index("posts_guestKey_idx").on(table.guestKey),
     index("posts_deletedAt_idx").on(table.deletedAt),
+    index("posts_hiddenAt_idx").on(table.hiddenAt),
   ],
 );
 

@@ -25,10 +25,9 @@ export function ShareCodes({
   const code = snippets[tab];
 
   return (
-    <div className="min-w-0 space-y-3">
-      <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Kısa bağlantınız</p>
+    <div className="@container min-w-0 space-y-3">
       <CopyLink url={pageUrl} />
-      <div className="flex flex-wrap gap-1 rounded-full bg-slate-100 p-1 dark:bg-slate-800">
+      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1 dark:bg-slate-800 @min-[22rem]:grid-cols-4">
         {SHARE_SNIPPET_TABS.map((item) => {
           const active = item.key === tab;
           return (
@@ -36,7 +35,7 @@ export function ShareCodes({
               key={item.key}
               type="button"
               onClick={() => setTab(item.key)}
-              className={`min-h-9 min-w-0 flex-1 rounded-full px-2 text-xs font-semibold @min-[36rem]:px-3 @min-[36rem]:text-sm ${
+              className={`min-h-9 rounded-xl px-2 text-xs font-semibold @min-[22rem]:rounded-full ${
                 active
                   ? "bg-violet-600 text-white shadow"
                   : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-700"
@@ -67,8 +66,8 @@ function SnippetBox({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
   return (
-    <div className="relative">
-      <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-900 px-3 py-3 pr-20 text-xs text-sky-100">
+    <div className="space-y-2">
+      <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-slate-900 px-3 py-3 text-xs text-sky-100">
         {code}
       </pre>
       <button
@@ -78,7 +77,7 @@ function SnippetBox({ code }: { code: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         }}
-        className="absolute right-2 top-2 rounded-lg bg-slate-700 px-2 py-1 text-[11px] font-medium text-white hover:bg-slate-600"
+        className="inline-flex min-h-9 w-full items-center justify-center rounded-lg bg-slate-800 text-xs font-medium text-white hover:bg-slate-700"
       >
         {copied ? "Kopyalandı" : "Kopyala"}
       </button>

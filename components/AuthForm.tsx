@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PasswordInput } from "@/components/PasswordInput";
 import { authClient } from "@/lib/auth-client";
+import { isValidUsername, loginToEmail, normalizeUsername } from "@/lib/username";
 
 type Mode = "giris" | "kayit";
 
@@ -12,8 +13,7 @@ const fieldClass =
 
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -21,13 +21,19 @@ export function AuthForm({ mode }: { mode: Mode }) {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
+    const raw = username.trim();
+    const isEmailLogin = mode === "giris" && raw.includes("@");
+    const name = isEmailLogin ? raw.toLowerCase() : normalizeUsername(raw);
+    if (!isEmailLogin && !isValidUsername(name)) {
+      setError("Kullanıcı adı 2–24 karakter olmalı; harf, rakam, nokta, _ veya -.");
+      return;
+    }
     setPending(true);
-
+    const email = isEmailLogin ? name : loginToEmail(name);
     const result =
       mode === "kayit"
         ? await authClient.signUp.email({ email, password, name })
         : await authClient.signIn.email({ email, password });
-
     setPending(false);
 
     if (result.error) {
@@ -41,27 +47,15 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
   return (
     <form onSubmit={onSubmit} className="mx-auto w-full max-w-sm space-y-4">
-      {mode === "kayit" ? (
-        <label className="block space-y-1 text-sm">
-          <span>Kullanıcı adı</span>
-          <input
-            required
-            minLength={2}
-            autoComplete="username"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={fieldClass}
-          />
-        </label>
-      ) : null}
       <label className="block space-y-1 text-sm">
-        <span>E-posta</span>
+        <span>Kullanıcı adı</span>
         <input
           required
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          minLength={2}
+          maxLength={24}
+          autoComplete="username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
           className={fieldClass}
         />
       </label>
@@ -72,7 +66,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           minLength={8}
           autoComplete={mode === "kayit" ? "new-password" : "current-password"}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(event) => setPassword(event.target.value)}
           className={fieldClass}
         />
       </label>

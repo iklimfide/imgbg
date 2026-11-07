@@ -10,7 +10,7 @@ export function MediaView({ post }: { post: Post }) {
         controls
         playsInline
         src={src}
-        className="max-h-[70vh] w-full rounded-xl bg-black sm:max-h-[80vh]"
+        className="mx-auto max-h-[70vh] w-full max-w-full rounded-2xl bg-black sm:max-h-[80vh]"
       />
     );
   }
@@ -27,7 +27,7 @@ export function MediaView({ post }: { post: Post }) {
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
-      alt={post.originalName ?? post.id}
+      alt=""
       className="max-h-[70vh] w-full rounded-xl object-contain sm:max-h-[80vh]"
     />
   );

@@ -1,7 +1,7 @@
 const ITEMS = [
   {
     q: "Dosyalarım ne kadar süre saklanır?",
-    a: "Yüklerken 1 dakika, 5 dakika, 1 gün, 1 ay veya 1 sene sonra silinsin seçebilirsin. Kalıcı saklama yalnızca üyelerde vardır.",
+    a: "Resimde 1 dakika, 5 dakika, 1 gün, 1 ay veya 1 sene seçebilirsin; kalıcı resim yalnızca üyelerde vardır. Video ve ses en fazla 24 saat sonra yayından kalkar.",
   },
   {
     q: "Üye olmak zorunda mıyım?",
@@ -21,7 +21,7 @@ const ITEMS = [
   },
   {
     q: "Üye olunca ne değişir?",
-    a: "Paylaşımların kalıcı olabilir; resim 20 MB, ses 50 MB, video 100 MB’a çıkar, toplam alan 2 GB olur.",
+    a: "Resimlerin kalıcı olabilir; resim 20 MB, ses 50 MB, video 50 MB’a çıkar, toplam alan 2 GB olur. Video ve ses yine en fazla 24 saat yayında kalır.",
   },
 ];
 

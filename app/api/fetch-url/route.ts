@@ -1,4 +1,5 @@
 import { downloadPublicMedia, filenameFromUrl } from "@/lib/remote-media";
+import { isAdminEmail } from "@/lib/admin";
 import { fileLimit, formatMb } from "@/lib/quota";
 import { rateLimit } from "@/lib/rate-limit";
 import { getSession } from "@/lib/session";
@@ -11,9 +12,10 @@ export async function POST(request: Request) {
   const session = await getSession();
   const user = session?.user ?? null;
   const isMember = Boolean(user);
+  const isAdmin = isAdminEmail(user?.email);
   const guestKey = isMember ? null : guestKeyFromRequest(request);
   const limitKey = isMember ? `fetch:user:${user!.id}` : `fetch:guest:${guestKey}`;
-  if (!rateLimit(limitKey, 20, 10 * 60 * 1000)) {
+  if (!isAdmin && !rateLimit(limitKey, 20, 10 * 60 * 1000)) {
     return Response.json({ error: "Çok fazla deneme. Biraz bekleyip tekrar dene." }, { status: 429 });
   }
 

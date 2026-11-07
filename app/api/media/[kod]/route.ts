@@ -21,12 +21,12 @@ export async function GET(
     return new Response("Bulunamadı", { status: 404 });
   }
 
-  if (!isPubliclyVisible(post) && !admin) {
+  const owner = Boolean(session?.user?.id && session.user.id === post.userId);
+  if (!isPubliclyVisible(post) && !admin && !owner) {
     return new Response("Bulunamadı", { status: 404 });
   }
 
   if (post.passwordHash && !admin) {
-    const owner = session?.user?.id && session.user.id === post.userId;
     const unlocked = await hasUnlocked(kod);
     if (!owner && !unlocked) {
       return new Response("Şifre gerekli", { status: 401 });
@@ -34,7 +34,7 @@ export async function GET(
   }
 
   const object = await getFromR2(post.r2Key);
-  if (!object.Body) {
+  if (!object.stream) {
     return new Response("Dosya yok", { status: 404 });
   }
 
@@ -45,7 +45,7 @@ export async function GET(
         ? "public, max-age=3600"
         : "public, max-age=31536000, immutable";
 
-  return new Response(object.Body.transformToWebStream(), {
+  return new Response(object.stream, {
     headers: {
       "Content-Type": post.mime,
       "Cache-Control": cache,

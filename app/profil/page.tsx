@@ -1,68 +1,62 @@
 import { and, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { ProfileSettings } from "@/components/ProfileSettings";
-import { ShareCodes } from "@/components/ShareCodes";
-import { DeletePostButton } from "@/components/DeletePostButton";
-import { MediaView } from "@/components/MediaView";
-import { db } from "@/db";
+import { ProfileUploads, type ProfilePostCard } from "@/components/ProfileUploads";
+import { getDb } from "@/db";
 import { posts } from "@/db/schema";
-import { publiclyVisible, usedStorage } from "@/lib/posts";
+import { notRemoved, usedStorage } from "@/lib/posts";
 import { formatMb, MEMBER_STORAGE_MAX_BYTES } from "@/lib/quota";
 import { getSession } from "@/lib/session";
-import { asShareKind, getSiteUrl, shareUrl } from "@/lib/site";
+import { getSiteUrl, shareUrl } from "@/lib/site";
 
-export default async function ProfilPage() {
+export const dynamic = "force-dynamic";
+
+function iso(value: Date | number | string | null | undefined) {
+  if (!value) {
+    return new Date().toISOString();
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+export default async function GaleriPage() {
   const session = await getSession();
   if (!session?.user) {
     redirect("/giris");
   }
 
+  const db = await getDb();
   const items = await db
     .select()
     .from(posts)
-    .where(and(eq(posts.userId, session.user.id), publiclyVisible))
+    .where(and(eq(posts.userId, session.user.id), notRemoved))
     .orderBy(desc(posts.createdAt));
 
   const origin = getSiteUrl();
   const used = await usedStorage({ userId: session.user.id });
+  const cards: ProfilePostCard[] = items.map((post) => ({
+    id: post.id,
+    type: post.type,
+    r2Key: post.r2Key,
+    mime: post.mime,
+    size: post.size,
+    originalName: post.originalName,
+    passwordHash: post.passwordHash,
+    hiddenAt: post.hiddenAt ? iso(post.hiddenAt) : null,
+    views: post.views ?? 0,
+    createdAt: iso(post.createdAt),
+    pageUrl: shareUrl(post.id, origin),
+  }));
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold sm:text-3xl">{session.user.name}</h1>
-        <p className="break-all text-sm text-slate-500 sm:text-base dark:text-slate-400">
-          {session.user.email}
-        </p>
+        <h1 className="text-2xl font-semibold sm:text-3xl">Galerim</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">@{session.user.name}</p>
         <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
           Kalıcı alan: {formatMb(used)} / {formatMb(MEMBER_STORAGE_MAX_BYTES)} MB
         </p>
       </div>
-      <ProfileSettings name={session.user.name} email={session.user.email} />
-
-      {items.length === 0 ? (
-        <p className="text-slate-500 dark:text-slate-400">Henüz yükleme yok.</p>
-      ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
-          {items.map((post) => (
-            <li
-              key={post.id}
-              className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 dark:border-slate-800 dark:bg-slate-900"
-            >
-              <MediaView post={post} />
-              <ShareCodes
-                pageUrl={shareUrl(post.id, origin)}
-                mediaUrl={`${origin}/api/media/${post.id}`}
-                name={post.originalName ?? post.id}
-                kind={asShareKind(post.type)}
-              />
-              <div className="flex items-center justify-between text-sm text-slate-500">
-                <span>/{post.id}</span>
-                <DeletePostButton kod={post.id} />
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ProfileUploads posts={cards} />
     </div>
   );
 }

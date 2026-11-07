@@ -8,7 +8,7 @@ import { ErrorModal } from "@/components/ErrorModal";
 import { LinkAddModal } from "@/components/LinkAddModal";
 import { ShareSuccessModal, type ShareResult } from "@/components/ShareSuccessModal";
 import { UploadProgressModal } from "@/components/UploadProgressModal";
-import { fileLimit, formatMb, TTL_OPTIONS } from "@/lib/quota";
+import { fileLimit, formatMb, ttlOptionsFor } from "@/lib/quota";
 import type { MediaKind } from "@/lib/site";
 
 const ACCEPT: Record<MediaKind, string> = {
@@ -85,9 +85,11 @@ function formatSize(bytes: number) {
 
 export function UploadPanel({
   member,
+  admin = false,
   initialKind = "image",
 }: {
   member: boolean;
+  admin?: boolean;
   initialKind?: MediaKind;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -97,7 +99,7 @@ export function UploadPanel({
   const resumeRef = useRef<(() => void) | null>(null);
   const [kind, setKind] = useState<MediaKind>(initialKind);
   const [items, setItems] = useState<QueueItem[]>([]);
-  const [ttl, setTtl] = useState(member ? "forever" : "1d");
+  const [ttl, setTtl] = useState(member && initialKind === "image" ? "forever" : "1d");
   const [protect, setProtect] = useState(false);
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -152,10 +154,14 @@ export function UploadPanel({
     setLinkOpen(false);
     setRecording(false);
     setError("");
+    if (next !== "image") {
+      const allowed = ttlOptionsFor(next).map((option) => option.key);
+      setTtl((current) => (allowed.includes(current as (typeof allowed)[number]) ? current : "1d"));
+    }
   }
 
   function addFiles(list: FileList | File[]) {
-    const limit = fileLimit(member, kind);
+    const limit = fileLimit(member, kind, admin);
     const incoming = Array.from(list).filter((file) => {
       const type = file.type;
       if (kind === "image") {
@@ -166,7 +172,7 @@ export function UploadPanel({
       }
       return type.startsWith("audio/") || /\.(mp3|wav|ogg|oga|m4a|aac|flac|webm)$/i.test(file.name);
     });
-    if (incoming.some((file) => file.size > limit)) {
+    if (Number.isFinite(limit) && incoming.some((file) => file.size > limit)) {
       setError(`Dosya boyutunuz çok büyük. İzin verilen ${formatMb(limit)}MB`);
       return;
     }
@@ -470,7 +476,11 @@ export function UploadPanel({
                     {kind === "image" ? "Resim yükle" : "Video yükle"}
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
-                    {kind === "image" ? "birden fazla dosya seçebilirsin" : "tek video seç"}
+                    {kind === "image"
+                      ? "birden fazla dosya seçebilirsin"
+                      : admin
+                        ? "tek video"
+                        : `tek video, en fazla ${formatMb(fileLimit(member, "video"))} MB`}
                   </p>
                 </>
               ) : (
@@ -556,14 +566,16 @@ export function UploadPanel({
               onChange={(event) => setTtl(event.target.value)}
               className="mt-3 w-full min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
             >
-              {TTL_OPTIONS.map((option) => (
+              {ttlOptionsFor(kind).map((option) => (
                 <option key={option.key} value={option.key}>
                   {option.label}
                 </option>
               ))}
-              {member ? <option value="forever">Kalıcı (silinmesin)</option> : null}
+              {member && kind === "image" ? <option value="forever">Kalıcı (silinmesin)</option> : null}
             </select>
-            {!member ? (
+            {kind !== "image" ? (
+              <p className="mt-2 text-xs text-slate-500">Video ve ses en fazla 24 saat sonra yayından kalkar.</p>
+            ) : !member ? (
               <p className="mt-2 text-xs text-slate-500">
                 Süreyi sen seçersin. Hiç silinmesin dersen{" "}
                 <Link href="/kayit" className="text-violet-600">

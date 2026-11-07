@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { CopyButton } from "@/components/CopyLink";
 import { MediaView } from "@/components/MediaView";
 import type { Post } from "@/db/schema";
 import { publicMediaUrl } from "@/lib/r2";
@@ -17,6 +19,7 @@ export type AdminPostCard = {
   ownerName: string | null;
   passwordHash: string | null;
   deletedAt: string | null;
+  hiddenAt?: string | null;
   expiresAt: string | null;
   createdAt: string;
   pageUrl: string;
@@ -24,9 +27,21 @@ export type AdminPostCard = {
 
 const PAGE_SIZE = 20;
 
+const KIND_FILTERS = [
+  { key: "all", label: "Tümü" },
+  { key: "image", label: "Resimler" },
+  { key: "video", label: "Videolar" },
+  { key: "audio", label: "Sesler" },
+] as const;
+
+type KindFilter = (typeof KIND_FILTERS)[number]["key"];
+
 function statusOf(post: AdminPostCard) {
   if (post.deletedAt) {
     return { label: "Silindi", hidden: true };
+  }
+  if (post.hiddenAt) {
+    return { label: "Gizli", hidden: true };
   }
   if (post.expiresAt && new Date(post.expiresAt).getTime() < Date.now()) {
     return { label: "Süresi doldu", hidden: true };
@@ -43,10 +58,12 @@ function asPost(item: AdminPostCard): Post {
     r2Key: item.r2Key,
     mime: item.mime,
     size: item.size,
+    views: 0,
     originalName: item.originalName,
     passwordHash: item.passwordHash,
     expiresAt: item.expiresAt ? new Date(item.expiresAt) : null,
     deletedAt: item.deletedAt ? new Date(item.deletedAt) : null,
+    hiddenAt: item.hiddenAt ? new Date(item.hiddenAt) : null,
     createdAt: new Date(item.createdAt),
   };
 }
@@ -92,11 +109,16 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   const [open, setOpen] = useState<AdminPostCard | null>(null);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<"all" | "live" | "hidden">("all");
+  const [kind, setKind] = useState<KindFilter>("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [ask, setAsk] = useState<{ message: string; run: () => Promise<void> } | null>(null);
 
   const filtered = useMemo(() => {
     return posts.filter((post) => {
+      if (kind !== "all" && post.type !== kind) {
+        return false;
+      }
       const hidden = statusOf(post).hidden;
       if (filter === "live") {
         return !hidden;
@@ -106,7 +128,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       }
       return true;
     });
-  }, [posts, filter]);
+  }, [posts, filter, kind]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
@@ -116,7 +138,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
 
   useEffect(() => {
     setSelected([]);
-  }, [filter, safePage]);
+  }, [filter, kind, safePage]);
 
   useEffect(() => {
     if (!open) {
@@ -150,7 +172,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   }
 
   async function purgeSelected() {
-    if (selected.length === 0 || !confirm(`${selected.length} kaydı kalıcı silmek istiyor musun?`)) {
+    if (selected.length === 0) {
       return;
     }
     setBusy(true);
@@ -164,6 +186,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       ),
     );
     setBusy(false);
+    setAsk(null);
     setSelected([]);
     router.refresh();
   }
@@ -180,6 +203,29 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
             Bu sayfa: {formatBytes(pageBytes)}
             <span className="ml-2 font-normal text-slate-400">· toplam {formatBytes(allBytes)}</span>
           </p>
+        </div>
+
+        <div className="flex flex-nowrap gap-1">
+          {KIND_FILTERS.map((item) => {
+            const active = kind === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => {
+                  setKind(item.key);
+                  setPage(1);
+                }}
+                className={`min-h-7 min-w-0 flex-1 truncate rounded-lg px-1.5 text-[11px] font-medium sm:min-h-8 sm:flex-none sm:px-2.5 sm:text-xs ${
+                  active
+                    ? "bg-violet-600 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -224,7 +270,12 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           <button
             type="button"
             disabled={busy || selected.length === 0}
-            onClick={() => void purgeSelected()}
+            onClick={() =>
+              setAsk({
+                message: `${selected.length} kaydı kalıcı silmek istiyor musun?`,
+                run: purgeSelected,
+              })
+            }
             className="min-h-9 rounded-lg border border-red-300 px-3 text-sm text-red-600 disabled:opacity-50"
           >
             Tümünü sil
@@ -290,10 +341,13 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                         minute: "2-digit",
                       })}
                     </td>
-                    <td className="max-w-[220px] px-2 py-2">
-                      <Link href={post.pageUrl} className="block truncate text-sky-600 hover:underline">
-                        {post.pageUrl}
-                      </Link>
+                    <td className="px-2 py-2">
+                      <div className="flex min-w-0 max-w-[280px] items-center gap-2">
+                        <Link href={post.pageUrl} className="min-w-0 truncate text-sky-600 hover:underline">
+                          {post.pageUrl}
+                        </Link>
+                        <CopyButton text={post.pageUrl} compact />
+                      </div>
                     </td>
                     <td className="px-2 py-2">{typeLabel(post.type)}</td>
                     <td className="whitespace-nowrap px-2 py-2">{formatBytes(post.size)}</td>
@@ -312,11 +366,15 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                           type="button"
                           disabled={busy}
                           title="Kalıcı sil"
-                          onClick={() => {
-                            if (confirm("Bu kaydı kalıcı silmek istiyor musun?")) {
-                              void run(post.id, "purge");
-                            }
-                          }}
+                          onClick={() =>
+                            setAsk({
+                              message: "Bu kaydı kalıcı silmek istiyor musun?",
+                              run: async () => {
+                                await run(post.id, "purge");
+                                setAsk(null);
+                              },
+                            })
+                          }
                           className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-50"
                         >
                           ⌫
@@ -343,11 +401,9 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-3 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-base font-semibold">{open.originalName ?? open.id}</p>
-                <p className="text-sm text-slate-500">
-                  /{open.id} · {statusOf(open).label}
-                </p>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <p className="min-w-0 truncate text-sm text-sky-600 sm:text-base">{open.pageUrl}</p>
+                <CopyButton text={open.pageUrl} compact />
               </div>
               <button
                 type="button"
@@ -362,6 +418,17 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           </div>
         </div>
       ) : null}
+      <ConfirmModal
+        open={Boolean(ask)}
+        message={ask?.message ?? ""}
+        pending={busy}
+        onCancel={() => setAsk(null)}
+        onConfirm={() => {
+          if (ask) {
+            void ask.run();
+          }
+        }}
+      />
     </>
   );
 }

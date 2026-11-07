@@ -1,9 +1,10 @@
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { posts } from "@/db/schema";
 import { toWebp } from "@/lib/convert-image";
 import { hashSharePassword } from "@/lib/password";
 import { guestKeyFromRequest, usedStorage } from "@/lib/posts";
 import { fileLimit, formatMb, resolveExpiry, storageLimit, ttlLabel } from "@/lib/quota";
+import { isAdminEmail } from "@/lib/admin";
 import { isR2Configured, uploadToR2 } from "@/lib/r2";
 import { rateLimit } from "@/lib/rate-limit";
 import { getSession } from "@/lib/session";
@@ -11,12 +12,13 @@ import { createShortCode } from "@/lib/short-code";
 import { makeDeleteToken } from "@/lib/unlock";
 import { ALLOWED_TYPES, mimeFromFileName, parseMediaKind } from "@/lib/site";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const session = await getSession();
   const user = session?.user ?? null;
   const isMember = Boolean(user);
+  const isAdmin = isAdminEmail(user?.email);
   const guestKey = isMember ? null : guestKeyFromRequest(request);
 
   if (!isR2Configured()) {
@@ -28,11 +30,22 @@ export async function POST(request: Request) {
 
   const limitKey = isMember ? `upload:user:${user!.id}` : `upload:guest:${guestKey}`;
   const maxUploads = isMember ? 40 : 25;
-  if (!rateLimit(limitKey, maxUploads, 10 * 60 * 1000)) {
+  if (!isAdmin && !rateLimit(limitKey, maxUploads, 10 * 60 * 1000)) {
     return Response.json(
       { error: "Çok fazla yükleme. Biraz bekleyip tekrar dene." },
       { status: 429 },
     );
+  }
+
+  if (!isAdmin) {
+    const contentLength = Number(request.headers.get("content-length") ?? 0);
+    const maxBody = fileLimit(isMember, "video") + 5 * 1024 * 1024;
+    if (contentLength > maxBody) {
+      return Response.json(
+        { error: `Dosya boyutunuz çok büyük. İzin verilen ${formatMb(fileLimit(isMember, "video"))}MB` },
+        { status: 400 },
+      );
+    }
   }
 
   const form = await request.formData();
@@ -76,8 +89,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const maxBytes = fileLimit(isMember, meta.type);
-  if (file.size > maxBytes) {
+  const maxBytes = fileLimit(isMember, meta.type, isAdmin);
+  if (Number.isFinite(maxBytes) && file.size > maxBytes) {
     return Response.json(
       { error: `Dosya boyutunuz çok büyük. İzin verilen ${formatMb(maxBytes)}MB` },
       { status: 400 },
@@ -87,25 +100,24 @@ export async function POST(request: Request) {
   const used = await usedStorage(
     isMember ? { userId: user!.id } : { guestKey: guestKey! },
   );
-  const cap = storageLimit(isMember);
+  const cap = storageLimit(isMember, isAdmin);
 
   const original = Buffer.from(await file.arrayBuffer());
-  let body = original;
+  let body: Buffer = original;
   let mime = mimeHint;
   let ext = meta.ext;
 
   if (meta.type === "image") {
-    try {
-      body = await toWebp(original);
+    const converted = await toWebp(original);
+    if (converted !== original) {
+      body = Buffer.from(converted);
       mime = "image/webp";
       ext = "webp";
-    } catch {
-      return Response.json({ error: "Resim WebP'ye çevrilemedi. Başka bir dosya dene." }, { status: 400 });
     }
   }
 
   const storeSize = body.byteLength;
-  if (used + storeSize > cap) {
+  if (Number.isFinite(cap) && used + storeSize > cap) {
     const hint = isMember
       ? ` Üye kotan ${formatMb(cap)} MB.`
       : ` Misafir kotası ${formatMb(cap)} MB. Üye olunca 2 GB kalıcı alanın olur.`;
@@ -118,8 +130,9 @@ export async function POST(request: Request) {
 
   await uploadToR2(r2Key, body, mime);
 
-  const expiresAt = resolveExpiry(isMember, ttl);
+  const expiresAt = resolveExpiry(isMember, ttl, meta.type);
 
+  const db = await getDb();
   await db
     .insert(posts)
     .values({
@@ -142,6 +155,6 @@ export async function POST(request: Request) {
     protected: Boolean(password),
     permanent: !expiresAt,
     expiresAt: expiresAt?.toISOString() ?? null,
-    ttlLabel: ttlLabel(isMember || ttl !== "forever" ? ttl : "1y"),
+    ttlLabel: ttlLabel(isMember || ttl !== "forever" ? ttl : "1y", meta.type),
   });
 }
