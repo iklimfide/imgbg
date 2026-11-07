@@ -1,8 +1,7 @@
-import { createClient } from "@libsql/client";
-import { drizzle as drizzleLibsql, type LibSQLDatabase } from "drizzle-orm/libsql";
+import type { SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import * as schema from "./schema";
 
-export type AppDb = LibSQLDatabase<typeof schema>;
+export type AppDb = SqliteRemoteDatabase<typeof schema>;
 
 let cached: AppDb | null = null;
 
@@ -11,18 +10,16 @@ export async function getDb(): Promise<AppDb> {
     return cached;
   }
 
-  const tursoUrl = process.env.TURSO_DATABASE_URL;
-  if (tursoUrl) {
-    const client = createClient({
-      url: tursoUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN,
-    });
-    cached = drizzleLibsql(client, { schema });
+  if (process.env.CLOUDFLARE_D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN) {
+    const { createD1Db } = await import("./d1-http");
+    cached = createD1Db();
     return cached;
   }
 
   if (process.env.VERCEL) {
-    throw new Error("Vercel'de TURSO_DATABASE_URL gerekli. SQLite dosyası orada kalıcı değil.");
+    throw new Error(
+      "Vercel'de D1 bağla: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_API_TOKEN",
+    );
   }
 
   const fs = await import("node:fs");
