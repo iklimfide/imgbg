@@ -86,6 +86,6 @@ export function createD1Db(): SqliteRemoteDatabase<typeof schema> {
     { schema, logger: false },
   );
   const run = async <T>(callback: (tx: typeof db) => Promise<T>) => callback(db);
-  db.transaction = run as typeof db.transaction;
+  db.transaction = run as unknown as typeof db.transaction;
   return db;
 }
