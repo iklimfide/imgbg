@@ -10,6 +10,10 @@ export function MobilePreview() {
     return () => document.documentElement.classList.remove("mobile-preview");
   }, [on]);
 
+  if (process.env.NODE_ENV !== "development") {
+    return null;
+  }
+
   return (
     <button
       type="button"

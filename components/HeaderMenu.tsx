@@ -39,12 +39,6 @@ export function HeaderMenu({
 
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <Link
-        href="/#yukle"
-        className="inline-flex min-h-10 shrink-0 items-center rounded-xl bg-violet-600 px-3 text-sm font-semibold text-white hover:bg-violet-500"
-      >
-        Yükle
-      </Link>
       <div className="relative" ref={rootRef}>
         <button
           type="button"

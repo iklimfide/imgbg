@@ -18,6 +18,44 @@ const ACCEPT: Record<MediaKind, string> = {
 };
 
 const MAX_FILES = 20;
+const TTL_STORE = "imgbg-ttl";
+
+function defaultTtl(kind: MediaKind) {
+  return kind === "image" ? "1mo" : "1d";
+}
+
+function ttlAllowed(kind: MediaKind, key: string, member: boolean) {
+  if (key === "forever") {
+    return member && kind === "image";
+  }
+  return ttlOptionsFor(kind).some((option) => option.key === key);
+}
+
+function readSavedTtl(kind: MediaKind, member: boolean) {
+  if (!member) {
+    return defaultTtl(kind);
+  }
+  try {
+    const saved = localStorage.getItem(`${TTL_STORE}:${kind}`);
+    if (saved && ttlAllowed(kind, saved, member)) {
+      return saved;
+    }
+  } catch {
+    /* ignore */
+  }
+  return defaultTtl(kind);
+}
+
+function writeSavedTtl(kind: MediaKind, key: string, member: boolean) {
+  if (!member || !ttlAllowed(kind, key, member)) {
+    return;
+  }
+  try {
+    localStorage.setItem(`${TTL_STORE}:${kind}`, key);
+  } catch {
+    /* ignore */
+  }
+}
 
 type QueueItem = {
   id: string;
@@ -151,7 +189,7 @@ export function UploadPanel({
   const resumeRef = useRef<(() => void) | null>(null);
   const [kind, setKind] = useState<MediaKind>(initialKind);
   const [items, setItems] = useState<QueueItem[]>([]);
-  const [ttl, setTtl] = useState(member && initialKind === "image" ? "forever" : "1d");
+  const [ttl, setTtl] = useState(defaultTtl(initialKind));
   const [protect, setProtect] = useState(false);
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -177,6 +215,11 @@ export function UploadPanel({
     // only on unmount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setTtl(readSavedTtl(initialKind, member));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member]);
 
   function revokeAll(list: QueueItem[]) {
     list.forEach((item) => URL.revokeObjectURL(item.preview));
@@ -206,10 +249,7 @@ export function UploadPanel({
     setLinkOpen(false);
     setRecording(false);
     setError("");
-    if (next !== "image") {
-      const allowed = ttlOptionsFor(next).map((option) => option.key);
-      setTtl((current) => (allowed.includes(current as (typeof allowed)[number]) ? current : "1d"));
-    }
+    setTtl(readSavedTtl(next, member));
   }
 
   function addFiles(list: FileList | File[]) {
@@ -642,13 +682,39 @@ export function UploadPanel({
           </div>
         ) : null}
 
+        <button
+          type="submit"
+          disabled={pending}
+          className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-500 text-base font-semibold text-white shadow-lg shadow-violet-200 hover:from-violet-500 hover:to-fuchsia-400 disabled:opacity-60 dark:shadow-none"
+        >
+          {pending
+            ? "Yükleniyor..."
+            : kind === "audio"
+              ? recording
+                ? "Kaydı durdur"
+                : items.length === 0
+                  ? "Ses kaydet"
+                  : "Kaydı paylaş"
+              : kind === "image"
+                ? items.length > 1
+                  ? "Resimleri yükle"
+                  : "Resim yükle"
+                : items.length > 1
+                  ? "Videoları yükle"
+                  : "Video yükle"}
+        </button>
+
         <div className="grid grid-cols-1 gap-4 @min-[36rem]:grid-cols-2">
           <label className="rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Saklama süresi</span>
             <select
               value={ttl}
-              onChange={(event) => setTtl(event.target.value)}
-              className="mt-3 w-full min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+              onChange={(event) => {
+                const next = event.target.value;
+                setTtl(next);
+                writeSavedTtl(kind, next, member);
+              }}
+              aria-label="Saklama süresi"
+              className="w-full min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
             >
               {ttlOptionsFor(kind).map((option) => (
                 <option key={option.key} value={option.key}>
@@ -703,28 +769,6 @@ export function UploadPanel({
             )}
           </div>
         </div>
-
-        <button
-          type="submit"
-          disabled={pending}
-          className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-500 text-base font-semibold text-white shadow-lg shadow-violet-200 hover:from-violet-500 hover:to-fuchsia-400 disabled:opacity-60 dark:shadow-none"
-        >
-          {pending
-            ? "Yükleniyor..."
-            : kind === "audio"
-              ? recording
-                ? "Kaydı durdur"
-                : items.length === 0
-                  ? "Ses kaydet"
-                  : "Kaydı paylaş"
-              : kind === "image"
-                ? items.length > 1
-                  ? "Resimleri yükle"
-                  : "Resim yükle"
-                : items.length > 1
-                  ? "Videoları yükle"
-                  : "Video yükle"}
-        </button>
       </div>
       <UploadProgressModal
         open={pending}

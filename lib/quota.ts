@@ -63,7 +63,7 @@ export function ttlLabel(key: string, kind: "image" | "video" | "audio" = "image
   if (key === "forever") {
     return "Kalıcı (silinmesin)";
   }
-  return TTL_OPTIONS.find((item) => item.key === key)?.label ?? "1 gün sonra silinsin";
+  return TTL_OPTIONS.find((item) => item.key === key)?.label ?? "1 ay sonra silinsin";
 }
 
 export function resolveExpiry(isMember: boolean, ttl: string, kind: "image" | "video" | "audio" = "image") {

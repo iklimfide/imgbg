@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { CopyButton } from "@/components/CopyLink";
 import { DeletePostButton } from "@/components/DeletePostButton";
-import { MediaView } from "@/components/MediaView";
-import type { Post } from "@/db/schema";
-import { publicMediaUrl } from "@/lib/r2";
+import { MediaPreview } from "@/components/MediaPreview";
 
 export type ProfilePostCard = {
   id: string;
@@ -21,6 +19,7 @@ export type ProfilePostCard = {
   views: number;
   createdAt: string;
   pageUrl: string;
+  src: string;
 };
 
 const PAGE_SIZE = 20;
@@ -33,25 +32,6 @@ const FILTERS = [
 ] as const;
 
 type GalleryFilter = (typeof FILTERS)[number]["key"];
-
-function asPost(item: ProfilePostCard): Post {
-  return {
-    id: item.id,
-    userId: null,
-    guestKey: null,
-    type: item.type,
-    r2Key: item.r2Key,
-    mime: item.mime,
-    size: item.size,
-    originalName: item.originalName,
-    passwordHash: item.passwordHash,
-    expiresAt: null,
-    hiddenAt: item.hiddenAt ? new Date(item.hiddenAt) : null,
-    deletedAt: null,
-    views: item.views,
-    createdAt: new Date(item.createdAt),
-  };
-}
 
 function formatBytes(bytes: number) {
   const mb = bytes / (1024 * 1024);
@@ -72,7 +52,7 @@ function typeLabel(type: ProfilePostCard["type"]) {
 }
 
 function Thumb({ post }: { post: ProfilePostCard }) {
-  const src = publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash));
+  const src = post.src;
   if (post.type === "video") {
     return <video src={src} muted playsInline preload="metadata" className="h-full w-full object-cover" />;
   }
@@ -355,7 +335,7 @@ export function ProfileUploads({ posts }: { posts: ProfilePostCard[] }) {
                 ×
               </button>
             </div>
-            <MediaView post={asPost(open)} />
+            <MediaPreview type={open.type} src={open.src} />
           </div>
         </div>
       ) : null}

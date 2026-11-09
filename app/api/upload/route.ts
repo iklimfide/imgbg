@@ -133,7 +133,7 @@ async function completeUpload(body: PrepareBody, ctx: Ctx) {
   if (!meta || meta.type !== kind) {
     return jsonError("MIME", `Bu dosya bu sekmeye uygun değil. (${mimeHint || "boş tür"})`);
   }
-  const ttl = typeof body.ttl === "string" ? body.ttl : "1d";
+  const ttl = typeof body.ttl === "string" ? body.ttl : "1mo";
   const password = typeof body.password === "string" ? body.password.trim() : "";
   if (password && (password.length < 4 || password.length > 64)) {
     return jsonError("PASSWORD", "Şifre 4-64 karakter olmalı.");

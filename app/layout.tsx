@@ -3,7 +3,6 @@ import { Outfit } from "next/font/google";
 import Script from "next/script";
 import { Header } from "@/components/Header";
 import { MobilePreview } from "@/components/MobilePreview";
-import { SiteFooter } from "@/components/SiteFooter";
 import { SITE_NAME } from "@/lib/site";
 import "./globals.css";
 
@@ -31,8 +30,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-6 sm:px-6 sm:py-8">
           {children}
         </main>
-        <SiteFooter />
-        <MobilePreview />
+        {process.env.NODE_ENV === "development" ? <MobilePreview /> : null}
       </body>
     </html>
   );

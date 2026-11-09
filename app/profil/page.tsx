@@ -6,6 +6,7 @@ import { posts } from "@/db/schema";
 import { notRemoved, usedStorage } from "@/lib/posts";
 import { formatMb, MEMBER_STORAGE_MAX_BYTES } from "@/lib/quota";
 import { getSession } from "@/lib/session";
+import { publicMediaUrl } from "@/lib/r2";
 import { getSiteUrl, shareUrl } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +46,7 @@ export default async function GaleriPage() {
     views: post.views ?? 0,
     createdAt: iso(post.createdAt),
     pageUrl: shareUrl(post.id, origin),
+    src: publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash)),
   }));
 
   return (

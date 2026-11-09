@@ -92,6 +92,28 @@ export async function signedPutUrl(key: string, contentType: string) {
   );
 }
 
+export async function signedGetUrl(key: string, expiresIn = 60 * 60 * 6) {
+  return getSignedUrl(
+    client(),
+    new GetObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+    }),
+    { expiresIn },
+  );
+}
+
+export async function mediaSrc(kod: string, r2Key: string, protectedShare = false) {
+  if (protectedShare) {
+    return `/api/media/${kod}`;
+  }
+  const base = process.env.R2_PUBLIC_URL?.replace(/\/$/, "");
+  if (base) {
+    return `${base}/${r2Key}`;
+  }
+  return signedGetUrl(r2Key);
+}
+
 export async function headFromR2(key: string) {
   try {
     const object = await client().send(

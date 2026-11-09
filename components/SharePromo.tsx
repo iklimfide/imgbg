@@ -7,10 +7,9 @@ export function SharePromo() {
       <h2 className="mt-2 text-xl font-semibold sm:text-2xl">
         Resim, Video, Ses kaydı. Üçü bir arada.
       </h2>
-      <p className="mt-1 text-base font-medium text-white/95">Medyan hazırsa, gerisi kolay.</p>
       <p className="mt-2 text-sm text-white/85">Yükle, kısa link al, saniyeler içinde paylaş.</p>
       <Link
-        href="/#yukle"
+        href="/"
         className="mt-5 inline-flex min-h-11 items-center rounded-full bg-white px-5 text-sm font-semibold text-violet-700 hover:bg-violet-50"
       >
         Hemen yükle ve paylaş

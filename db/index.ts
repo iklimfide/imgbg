@@ -12,10 +12,9 @@ export async function getDb(): Promise<AppDb> {
 
   if (process.env.CLOUDFLARE_D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN) {
     try {
-      const { createD1Db, pingD1, ensureD1Schema } = await import("./d1-http");
-      await pingD1();
-      await ensureD1Schema();
+      const { createD1Db, ensureD1Schema } = await import("./d1-http");
       cached = createD1Db();
+      void ensureD1Schema().catch(() => undefined);
       return cached;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "D1 bağlanamadı";

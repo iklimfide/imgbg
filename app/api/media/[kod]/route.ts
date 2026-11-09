@@ -1,6 +1,6 @@
 import { isAdminEmail } from "@/lib/admin";
 import { getPost, isPubliclyVisible } from "@/lib/posts";
-import { getFromR2, isR2Configured } from "@/lib/r2";
+import { getFromR2, isR2Configured, signedGetUrl } from "@/lib/r2";
 import { getSession } from "@/lib/session";
 import { hasUnlocked } from "@/lib/unlock";
 
@@ -13,8 +13,7 @@ export async function GET(
   }
 
   const { kod } = await params;
-  const post = await getPost(kod);
-  const session = await getSession();
+  const [post, session] = await Promise.all([getPost(kod), getSession()]);
   const admin = isAdminEmail(session?.user?.email);
 
   if (!post) {
@@ -33,22 +32,20 @@ export async function GET(
     }
   }
 
+  if (!post.passwordHash && isPubliclyVisible(post)) {
+    const url = await signedGetUrl(post.r2Key);
+    return Response.redirect(url, 302);
+  }
+
   const object = await getFromR2(post.r2Key);
   if (!object.stream) {
     return new Response("Dosya yok", { status: 404 });
   }
 
-  const cache =
-    post.passwordHash || !isPubliclyVisible(post)
-      ? "private, no-store"
-      : post.expiresAt
-        ? "public, max-age=3600"
-        : "public, max-age=31536000, immutable";
-
   return new Response(object.stream, {
     headers: {
       "Content-Type": post.mime,
-      "Cache-Control": cache,
+      "Cache-Control": "private, no-store",
     },
   });
 }

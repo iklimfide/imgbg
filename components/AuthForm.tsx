@@ -52,7 +52,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         <input
           required
           minLength={2}
-          maxLength={24}
+          maxLength={mode === "giris" ? 254 : 24}
           autoComplete="username"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
