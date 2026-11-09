@@ -9,6 +9,7 @@ import { LinkAddModal } from "@/components/LinkAddModal";
 import { ShareSuccessModal, type ShareResult } from "@/components/ShareSuccessModal";
 import { UploadProgressModal } from "@/components/UploadProgressModal";
 import { fileLimit, formatMb, ttlOptionsFor } from "@/lib/quota";
+import { normalizeHttpUrl, readSeenLinks, rememberSeenLinks } from "@/lib/seen-links";
 import type { MediaKind } from "@/lib/site";
 
 const ACCEPT: Record<MediaKind, string> = {
@@ -17,7 +18,7 @@ const ACCEPT: Record<MediaKind, string> = {
   audio: "audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/webm,audio/mp4,audio/aac,audio/x-m4a,audio/flac,.mp3,.wav,.ogg,.m4a,.aac,.flac,.webm",
 };
 
-const MAX_FILES = 20;
+const MAX_FILES = 400;
 const TTL_STORE = "imgbg-ttl";
 
 function defaultTtl(kind: MediaKind) {
@@ -61,6 +62,7 @@ type QueueItem = {
   id: string;
   file: File;
   preview: string;
+  sourceUrl?: string;
 };
 
 type UploadJson = {
@@ -72,6 +74,9 @@ type UploadJson = {
   ttlLabel?: string;
   protected?: boolean;
   deleteToken?: string;
+  existing?: boolean;
+  putUrl?: string;
+  mime?: string;
 };
 
 function htmlHint(status: number, text: string) {
@@ -123,6 +128,37 @@ async function readJson<T extends UploadJson>(response: Response, step: string) 
     };
   }
   return payload;
+}
+
+function isRateLimited(cause: unknown) {
+  if (!cause || typeof cause !== "object") {
+    return false;
+  }
+  const record = cause as { status?: number; code?: string; error?: string };
+  return record.status === 429 || record.code === "RATE" || String(record.error ?? "").includes("429");
+}
+
+async function postUpload<T extends UploadJson>(body: object, step: string) {
+  let last: unknown;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return await readJson<T>(
+        await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        step,
+      );
+    } catch (cause) {
+      last = cause;
+      if (!isRateLimited(cause) || attempt === 7) {
+        throw cause;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000 * 2 ** attempt));
+    }
+  }
+  throw last;
 }
 
 function putWithXhr(
@@ -187,6 +223,9 @@ export function UploadPanel({
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const actionRef = useRef<"pause" | "cancel" | null>(null);
   const resumeRef = useRef<(() => void) | null>(null);
+  const fetchActionRef = useRef<"pause" | "cancel" | null>(null);
+  const fetchResumeRef = useRef<(() => void) | null>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const [kind, setKind] = useState<MediaKind>(initialKind);
   const [items, setItems] = useState<QueueItem[]>([]);
   const [ttl, setTtl] = useState(defaultTtl(initialKind));
@@ -203,6 +242,8 @@ export function UploadPanel({
   const [modalOpen, setModalOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [fetchingUrl, setFetchingUrl] = useState(false);
+  const [fetchingNote, setFetchingNote] = useState("");
+  const [fetchingPaused, setFetchingPaused] = useState(false);
   const [recording, setRecording] = useState(false);
 
   const isImage = kind === "image";
@@ -252,7 +293,7 @@ export function UploadPanel({
     setTtl(readSavedTtl(next, member));
   }
 
-  function addFiles(list: FileList | File[]) {
+  function addFiles(list: FileList | File[], sourceUrl?: string) {
     const limit = fileLimit(member, kind, admin);
     const incoming = Array.from(list).filter((file) => {
       const type = file.type;
@@ -280,15 +321,21 @@ export function UploadPanel({
             id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
             file,
             preview: URL.createObjectURL(file),
+            sourceUrl,
           },
         ];
       }
       const room = MAX_FILES - current.length;
-      const next = incoming.slice(0, room).map((file) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
-        file,
-        preview: URL.createObjectURL(file),
-      }));
+      const queuedNames = new Set(current.map((item) => item.file.name.toLowerCase()));
+      const next = incoming
+        .filter((file) => !queuedNames.has(file.name.toLowerCase()))
+        .slice(0, room)
+        .map((file) => ({
+          id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+          file,
+          preview: URL.createObjectURL(file),
+          sourceUrl,
+        }));
       return [...current, ...next];
     });
     setError("");
@@ -309,39 +356,134 @@ export function UploadPanel({
     setItems([]);
   }
 
-  async function addFromUrl(url: string) {
-    if (!isImage) {
+  async function addFromUrls(urls: string[]) {
+    if (kind === "audio") {
       return "Bu sekmede bağlantı eklenmez.";
     }
-    const next = url.trim();
-    if (!next) {
+    const unique = [...new Set(urls.map((url) => normalizeHttpUrl(url)).filter(Boolean))];
+    if (unique.length === 0) {
       return "Bir bağlantı yapıştır.";
     }
-    if (items.length >= MAX_FILES) {
-      return `En fazla ${MAX_FILES} dosya ekleyebilirsin.`;
-    }
-    setFetchingUrl(true);
-    try {
-      const response = await fetch("/api/fetch-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: next, kind }),
-      });
-      if (!response.ok) {
-        const json = (await response.json().catch(() => null)) as { error?: string } | null;
-        return json?.error ?? "Bağlantıdan dosya alınamadı.";
+    const seen = readSeenLinks();
+    for (const item of items) {
+      if (item.sourceUrl) {
+        seen.add(normalizeHttpUrl(item.sourceUrl));
       }
-      const blob = await response.blob();
-      const rawName = response.headers.get("X-File-Name");
-      const name = rawName ? decodeURIComponent(rawName) : "link";
-      const file = new File([blob], name, { type: blob.type || "image/jpeg" });
-      addFiles([file]);
-      return null;
-    } catch {
-      return "Bağlantıdan dosya alınamadı.";
-    } finally {
-      setFetchingUrl(false);
+      seen.add(item.file.name.toLowerCase());
     }
+    const fresh = unique.filter((url) => !seen.has(url));
+    const known = unique.length - fresh.length;
+    const room = kind === "video" ? 1 : MAX_FILES - items.length;
+    if (room <= 0) {
+      return `En fazla ${kind === "video" ? 1 : MAX_FILES} dosya ekleyebilirsin.`;
+    }
+    if (fresh.length === 0) {
+      rememberSeenLinks(unique);
+      return known > 0 ? "Bu bağlantılar zaten ekli." : "Bir bağlantı yapıştır.";
+    }
+    const queued = fresh.slice(0, room);
+    const capped = fresh.length - queued.length;
+    setFetchingUrl(true);
+    setFetchingPaused(false);
+    fetchActionRef.current = null;
+    const failed: string[] = [];
+    const remembered: string[] = [];
+    const queuedNames = new Set(items.map((item) => item.file.name.toLowerCase()));
+    let added = 0;
+    let skippedExisting = known;
+    try {
+      for (let index = 0; index < queued.length; index += 1) {
+        if (fetchActionRef.current === "cancel") {
+          break;
+        }
+        if (fetchActionRef.current === "pause") {
+          await new Promise<void>((resolve) => {
+            fetchResumeRef.current = resolve;
+          });
+          index -= 1;
+          continue;
+        }
+        const next = queued[index];
+        setFetchingNote(`${index + 1}/${queued.length}`);
+        const abort = new AbortController();
+        fetchAbortRef.current = abort;
+        try {
+          const response = await fetch("/api/fetch-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: next, kind }),
+            signal: abort.signal,
+          });
+          const jsonType = response.headers.get("content-type") ?? "";
+          if (jsonType.includes("application/json")) {
+            const json = (await response.json().catch(() => null)) as {
+              error?: string;
+              skipped?: boolean;
+            } | null;
+            if (!response.ok) {
+              failed.push(`${next} — ${json?.error ?? "alınamadı"}`);
+              continue;
+            }
+            if (json?.skipped) {
+              remembered.push(next);
+              skippedExisting += 1;
+              continue;
+            }
+            failed.push(`${next} — alınamadı`);
+            continue;
+          }
+          if (!response.ok) {
+            const json = (await response.json().catch(() => null)) as { error?: string } | null;
+            failed.push(`${next} — ${json?.error ?? "alınamadı"}`);
+            continue;
+          }
+          const blob = await response.blob();
+          const rawName = response.headers.get("X-File-Name");
+          const name = rawName ? decodeURIComponent(rawName) : "link";
+          if (queuedNames.has(name.toLowerCase())) {
+            remembered.push(next);
+            skippedExisting += 1;
+            continue;
+          }
+          const file = new File([blob], name, { type: blob.type || "image/jpeg" });
+          queuedNames.add(name.toLowerCase());
+          addFiles([file], next);
+          remembered.push(next);
+          added += 1;
+        } catch (cause) {
+          if (fetchActionRef.current === "cancel" || (cause instanceof DOMException && cause.name === "AbortError")) {
+            break;
+          }
+          failed.push(`${next} — alınamadı`);
+        } finally {
+          fetchAbortRef.current = null;
+        }
+      }
+    } finally {
+      rememberSeenLinks(remembered);
+      setFetchingUrl(false);
+      setFetchingNote("");
+      setFetchingPaused(false);
+      fetchActionRef.current = null;
+      fetchResumeRef.current = null;
+    }
+    if (failed.length === 0 && capped === 0 && (added > 0 || skippedExisting === unique.length)) {
+      return added === 0 && skippedExisting > 0 ? "Bu bağlantılar zaten ekli." : null;
+    }
+    const parts: string[] = [];
+    if (added > 0) {
+      parts.push(`${added} görsel eklendi.`);
+    }
+    if (skippedExisting > 0) {
+      parts.push(`${skippedExisting} bağlantı zaten ekli, atlandı.`);
+    }
+    if (capped > 0) {
+      parts.push(`En fazla ${MAX_FILES} dosya; ${capped} bağlantı atlandı.`);
+    }
+    if (failed.length > 0) {
+      parts.push(failed.join("\n"));
+    }
+    return parts.join(" ");
   }
 
   async function onSubmit(event: React.FormEvent) {
@@ -391,20 +533,32 @@ export function UploadPanel({
       }
       const item = queue[index];
       try {
-        const prepared = await readJson<UploadJson & { putUrl?: string; mime?: string; kod?: string }>(
-          await fetch("/api/upload", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              kind,
-              ttl,
-              name: item.file.name,
-              size: item.file.size,
-              mime: item.file.type,
-            }),
-          }),
+        const prepared = await postUpload<UploadJson>(
+          {
+            kind,
+            ttl,
+            name: item.file.name,
+            size: item.file.size,
+            mime: item.file.type,
+          },
           "PREPARE",
         );
+
+        if (prepared.existing && prepared.kod && prepared.deleteToken) {
+          note = prepared.ttlLabel || note;
+          uploaded.push({
+            kod: prepared.kod,
+            url: `${window.location.origin}/${prepared.kod}`,
+            preview: item.preview,
+            kind,
+            name: item.file.name,
+            deleteToken: prepared.deleteToken,
+          });
+          doneBytes += item.file.size;
+          setLoadedBytes(doneBytes);
+          index += 1;
+          continue;
+        }
 
         if (!prepared.putUrl || !prepared.kod) {
           throw { error: prepared.error ?? "yüklenemedi" };
@@ -424,20 +578,16 @@ export function UploadPanel({
           },
         );
 
-        const json = await readJson<UploadJson>(
-          await fetch("/api/upload", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              step: "complete",
-              kod: prepared.kod,
-              kind,
-              ttl,
-              password: protect ? password.trim() : "",
-              name: item.file.name,
-              mime,
-            }),
-          }),
+        const json = await postUpload<UploadJson>(
+          {
+            step: "complete",
+            kod: prepared.kod,
+            kind,
+            ttl,
+            password: protect ? password.trim() : "",
+            name: item.file.name,
+            mime,
+          },
           "COMPLETE",
         );
 
@@ -623,12 +773,16 @@ export function UploadPanel({
           />
         )}
 
-        {isImage ? (
+        {kind !== "audio" ? (
           <button
             type="button"
             disabled={pending}
             onClick={() => setLinkOpen(true)}
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-violet-200 px-4 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60 dark:border-slate-600 dark:text-violet-300"
+            className={`inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 text-sm font-medium disabled:opacity-60 ${
+              isImage
+                ? "border-violet-200 text-violet-700 hover:bg-violet-50 dark:border-slate-600 dark:text-violet-300"
+                : "border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-50 dark:border-slate-600 dark:text-fuchsia-300"
+            }`}
           >
             Linkten ekle
           </button>
@@ -796,9 +950,35 @@ export function UploadPanel({
       />
       <LinkAddModal
         open={linkOpen}
+        kind={kind === "video" ? "video" : "image"}
         pending={fetchingUrl}
+        pendingNote={fetchingNote}
+        paused={fetchingPaused}
+        onPause={() => {
+          fetchActionRef.current = "pause";
+          setFetchingPaused(true);
+        }}
+        onResume={() => {
+          fetchActionRef.current = null;
+          setFetchingPaused(false);
+          fetchResumeRef.current?.();
+          fetchResumeRef.current = null;
+        }}
+        onCancelFetch={() => {
+          fetchActionRef.current = "cancel";
+          setFetchingPaused(false);
+          fetchAbortRef.current?.abort();
+          fetchResumeRef.current?.();
+          fetchResumeRef.current = null;
+        }}
         onClose={() => setLinkOpen(false)}
-        onAdd={addFromUrl}
+        onAdd={async (urls) => {
+          const message = await addFromUrls(urls);
+          if (message && !message.includes("zaten ekli")) {
+            setError(message);
+          }
+          return null;
+        }}
       />
       <ErrorModal message={error} onClose={() => setError("")} />
       <ShareSuccessModal

@@ -110,17 +110,74 @@ export async function assertPublicHttpUrl(raw: string) {
   return parsed;
 }
 
-export async function downloadPublicMedia(rawUrl: string, maxBytes: number) {
+const HTML_SNIFF_BYTES = 1_048_576;
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+function isHtmlPayload(buf: Buffer, contentType: string | null) {
+  const type = contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (type === "text/html" || type === "application/xhtml+xml") {
+    return true;
+  }
+  const head = buf
+    .subarray(0, 512)
+    .toString("latin1")
+    .replace(/^\uFEFF/, "")
+    .trimStart()
+    .toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html");
+}
+
+function unescapeHtml(value: string) {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function imageUrlFromSharePage(html: string, base: string) {
+  const patterns = [
+    /<meta\b[^>]*\bproperty\s*=\s*["']og:image["'][^>]*\bcontent\s*=\s*["']([^"']+)["']/i,
+    /<meta\b[^>]*\bcontent\s*=\s*["']([^"']+)["'][^>]*\bproperty\s*=\s*["']og:image["']/i,
+    /<meta\b[^>]*\bname\s*=\s*["']twitter:image(?::src)?["'][^>]*\bcontent\s*=\s*["']([^"']+)["']/i,
+    /<meta\b[^>]*\bcontent\s*=\s*["']([^"']+)["'][^>]*\bname\s*=\s*["']twitter:image(?::src)?["']/i,
+    /<link\b[^>]*\brel\s*=\s*["']image_src["'][^>]*\bhref\s*=\s*["']([^"']+)["']/i,
+    /<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["']image_src["']/i,
+  ];
+  for (const pattern of patterns) {
+    const raw = html.match(pattern)?.[1]?.trim();
+    if (!raw) {
+      continue;
+    }
+    try {
+      const href = new URL(unescapeHtml(raw), base).href;
+      if (href.startsWith("http://") || href.startsWith("https://")) {
+        return href;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+async function fetchPublicBuffer(rawUrl: string, maxBytes: number, referer?: string) {
   let current = rawUrl.trim();
   for (let hop = 0; hop < 4; hop += 1) {
     const parsed = await assertPublicHttpUrl(current);
+    const headers: Record<string, string> = {
+      Accept: "image/*,video/*,text/html;q=0.9,*/*;q=0.8",
+      "User-Agent": BROWSER_UA,
+    };
+    if (referer) {
+      headers.Referer = referer;
+    }
     const response = await fetch(parsed.href, {
       redirect: "manual",
-      headers: {
-        Accept: "image/*,video/*,*/*;q=0.8",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
+      headers,
       signal: AbortSignal.timeout(20_000),
     });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -153,12 +210,59 @@ export async function downloadPublicMedia(rawUrl: string, maxBytes: number) {
       }
       chunks.push(value);
     }
-    const buf = Buffer.concat(chunks);
-    const mime = sniffMime(buf, response.headers.get("content-type"));
-    if (!mime) {
-      throw new Error("Bu adres doğrudan bir resim veya video değil.");
-    }
-    return { buf, mime, url: parsed.href };
+    return {
+      buf: Buffer.concat(chunks),
+      contentType: response.headers.get("content-type"),
+      url: parsed.href,
+    };
   }
   throw new Error("Çok fazla yönlendirme.");
+}
+
+export async function inspectRemoteMedia(rawUrl: string, maxBytes: number) {
+  const first = await fetchPublicBuffer(rawUrl, maxBytes);
+  const mime = sniffMime(first.buf, first.contentType);
+  if (mime) {
+    return {
+      buf: first.buf,
+      mime,
+      url: first.url,
+      referer: undefined as string | undefined,
+      name: filenameFromUrl(first.url, mime),
+    };
+  }
+  if (!isHtmlPayload(first.buf, first.contentType)) {
+    throw new Error("Bu adres doğrudan bir resim veya video değil.");
+  }
+  const html = first.buf.subarray(0, HTML_SNIFF_BYTES).toString("utf8");
+  const embedded = imageUrlFromSharePage(html, first.url);
+  if (!embedded) {
+    throw new Error("Bu adres bir paylaşım sayfası; içindeki resim bulunamadı.");
+  }
+  return {
+    buf: null as Buffer | null,
+    mime: null as string | null,
+    url: embedded,
+    referer: first.url,
+    name: filenameFromUrl(embedded, "image/jpeg"),
+  };
+}
+
+export async function materializeRemoteMedia(
+  inspected: Awaited<ReturnType<typeof inspectRemoteMedia>>,
+  maxBytes: number,
+) {
+  if (inspected.buf && inspected.mime) {
+    return { buf: inspected.buf, mime: inspected.mime, url: inspected.url };
+  }
+  const file = await fetchPublicBuffer(inspected.url, maxBytes, inspected.referer);
+  const fileMime = sniffMime(file.buf, file.contentType);
+  if (!fileMime) {
+    throw new Error("Bu adres doğrudan bir resim veya video değil.");
+  }
+  return { buf: file.buf, mime: fileMime, url: file.url };
+}
+
+export async function downloadPublicMedia(rawUrl: string, maxBytes: number) {
+  return materializeRemoteMedia(await inspectRemoteMedia(rawUrl, maxBytes), maxBytes);
 }

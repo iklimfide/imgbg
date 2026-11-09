@@ -1,7 +1,8 @@
 import { getDb } from "@/db";
-import { posts } from "@/db/schema";
+import { posts, type Post } from "@/db/schema";
 import { isAdminEmail } from "@/lib/admin";
 import { hashSharePassword } from "@/lib/password";
+import { fileBaseName, findExistingUpload } from "@/lib/existing-upload";
 import { guestKeyFromRequest, usedStorage } from "@/lib/posts";
 import { fileLimit, formatMb, resolveExpiry, storageLimit, ttlLabel } from "@/lib/quota";
 import { ensureR2Cors, headFromR2, isR2Configured, signedPutUrl } from "@/lib/r2";
@@ -55,6 +56,18 @@ function failMessage(cause: unknown) {
   return cause instanceof Error ? cause.message : "Yükleme başarısız.";
 }
 
+function existingResponse(row: Post) {
+  return Response.json({
+    kod: row.id,
+    existing: true,
+    deleteToken: makeDeleteToken(row.id),
+    mime: row.mime,
+    protected: Boolean(row.passwordHash),
+    permanent: !row.expiresAt,
+    ttlLabel: "Zaten yüklü.",
+  });
+}
+
 export async function POST(request: Request) {
   try {
     if (!isR2Configured()) {
@@ -72,17 +85,26 @@ export async function POST(request: Request) {
     const guestKey = isMember ? null : guestKeyFromHeaders(request.headers);
     const ctx: Ctx = { user, isMember, isAdmin, guestKey };
 
-    const limitKey = isMember ? `upload:user:${user!.id}` : `upload:guest:${guestKey}`;
-    if (!isAdmin && !rateLimit(limitKey, isMember ? 40 : 25, 10 * 60 * 1000)) {
-      return jsonError("RATE", "Çok fazla yükleme. Biraz bekleyip tekrar dene.", 429);
-    }
-
     const body = (await request.json().catch(() => null)) as PrepareBody | null;
     if (!body) {
       return jsonError("BAD_JSON", "İstek okunamadı.");
     }
     if (body.step === "complete") {
       return await completeUpload(body, ctx);
+    }
+    const existing = await findExistingUpload({
+      userId: ctx.user?.id,
+      guestKey: ctx.guestKey,
+      name: fileBaseName(String(body.name ?? "")),
+      size: Number(body.size ?? 0),
+      kind: parseMediaKind(body.kind ?? "image"),
+    });
+    if (existing) {
+      return existingResponse(existing);
+    }
+    const limitKey = isMember ? `upload:user:${user!.id}` : `upload:guest:${guestKey}`;
+    if (!isAdmin && !rateLimit(limitKey, isMember ? 1000 : 25, 10 * 60 * 1000)) {
+      return jsonError("RATE", "Çok fazla yükleme. Biraz bekleyip tekrar dene.", 429);
     }
     return await prepareUpload(body, ctx);
   } catch (cause) {
