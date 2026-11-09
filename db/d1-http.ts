@@ -75,7 +75,7 @@ export async function ensureD1Schema() {
 }
 
 export function createD1Db(): SqliteRemoteDatabase<typeof schema> {
-  return drizzle(
+  const db = drizzle(
     async (sql, params, method) => {
       const rows = await d1Raw(sql, params);
       if (method === "get") {
@@ -85,4 +85,7 @@ export function createD1Db(): SqliteRemoteDatabase<typeof schema> {
     },
     { schema, logger: false },
   );
+  const run = async <T>(callback: (tx: typeof db) => Promise<T>) => callback(db);
+  db.transaction = run as typeof db.transaction;
+  return db;
 }

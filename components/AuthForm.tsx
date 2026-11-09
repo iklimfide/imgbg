@@ -30,14 +30,19 @@ export function AuthForm({ mode }: { mode: Mode }) {
     }
     setPending(true);
     const email = isEmailLogin ? name : loginToEmail(name);
-    const result =
-      mode === "kayit"
-        ? await authClient.signUp.email({ email, password, name })
-        : await authClient.signIn.email({ email, password });
-    setPending(false);
-
-    if (result.error) {
-      setError(result.error.message ?? "İşlem başarısız.");
+    try {
+      const result =
+        mode === "kayit"
+          ? await authClient.signUp.email({ email, password, name })
+          : await authClient.signIn.email({ email, password });
+      setPending(false);
+      if (result.error) {
+        setError(result.error.message ?? result.error.statusText ?? "İşlem başarısız.");
+        return;
+      }
+    } catch (cause) {
+      setPending(false);
+      setError(cause instanceof Error ? cause.message : "İşlem başarısız.");
       return;
     }
 
@@ -48,7 +53,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   return (
     <form onSubmit={onSubmit} className="mx-auto w-full max-w-sm space-y-4">
       <label className="block space-y-1 text-sm">
-        <span>Kullanıcı adı</span>
+        <span>{mode === "giris" ? "E-posta veya kullanıcı adı" : "Kullanıcı adı"}</span>
         <input
           required
           minLength={2}
