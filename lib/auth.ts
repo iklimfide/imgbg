@@ -23,7 +23,7 @@ function authBaseUrl() {
   if (process.env.VERCEL) {
     return "https://imgbg.net";
   }
-  return (process.env.BETTER_AUTH_URL ?? publicUrl || "http://localhost:3000").replace(/\/$/, "");
+  return ((process.env.BETTER_AUTH_URL ?? publicUrl) || "http://localhost:3000").replace(/\/$/, "");
 }
 
 function trustedOrigins() {
