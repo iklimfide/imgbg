@@ -129,7 +129,7 @@ async function fileResponse(
   if (existing) {
     return Response.json({ skipped: true, name, kod: existing.id });
   }
-  return new Response(file.buf, {
+  return new Response(Uint8Array.from(file.buf), {
     headers: {
       "Content-Type": file.mime,
       "Content-Disposition": `inline; filename="${encodeURIComponent(name)}"`,
