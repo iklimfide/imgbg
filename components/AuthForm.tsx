@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PasswordInput } from "@/components/PasswordInput";
 import { authClient } from "@/lib/auth-client";
+import { authErrorTr } from "@/lib/auth-messages";
 import { isValidUsername, loginToEmail, normalizeUsername } from "@/lib/username";
 
 type Mode = "giris" | "kayit";
@@ -15,8 +16,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [showPasswords, setShowPasswords] = useState(false);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -28,6 +31,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
       setError("Kullanıcı adı 2–24 karakter olmalı; harf, rakam, nokta, _ veya -.");
       return;
     }
+    if (mode === "kayit" && password !== confirm) {
+      setError("Şifreler eşleşmiyor.");
+      return;
+    }
     setPending(true);
     const email = isEmailLogin ? name : loginToEmail(name);
     try {
@@ -37,12 +44,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
           : await authClient.signIn.email({ email, password });
       setPending(false);
       if (result.error) {
-        setError(result.error.message ?? result.error.statusText ?? "İşlem başarısız.");
+        setError(authErrorTr(result.error, mode));
         return;
       }
     } catch (cause) {
       setPending(false);
-      setError(cause instanceof Error ? cause.message : "İşlem başarısız.");
+      setError(authErrorTr(cause, mode));
       return;
     }
 
@@ -73,8 +80,25 @@ export function AuthForm({ mode }: { mode: Mode }) {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           className={fieldClass}
+          visible={showPasswords}
+          onToggleVisible={() => setShowPasswords((value) => !value)}
         />
       </label>
+      {mode === "kayit" ? (
+        <label className="block space-y-1 text-sm">
+          <span>Şifre tekrar</span>
+          <PasswordInput
+            required
+            minLength={8}
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(event) => setConfirm(event.target.value)}
+            className={fieldClass}
+            visible={showPasswords}
+            onToggleVisible={() => setShowPasswords((value) => !value)}
+          />
+        </label>
+      ) : null}
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
       <button
         type="submit"
