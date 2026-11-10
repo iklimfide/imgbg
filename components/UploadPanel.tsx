@@ -780,8 +780,8 @@ export function UploadPanel({
             onClick={() => setLinkOpen(true)}
             className={`inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 text-sm font-medium disabled:opacity-60 ${
               isImage
-                ? "border-violet-200 text-violet-700 hover:bg-violet-50 dark:border-slate-600 dark:text-violet-300"
-                : "border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-50 dark:border-slate-600 dark:text-fuchsia-300"
+                ? "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-950/70"
+                : "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 dark:border-fuchsia-800 dark:bg-fuchsia-950/40 dark:text-fuchsia-300 dark:hover:bg-fuchsia-950/70"
             }`}
           >
             Linkten ekle
@@ -859,7 +859,7 @@ export function UploadPanel({
         </button>
 
         <div className="grid grid-cols-1 gap-4 @min-[36rem]:grid-cols-2">
-          <label className="rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+          <label className="rounded-2xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/35">
             <select
               value={ttl}
               onChange={(event) => {
@@ -868,7 +868,7 @@ export function UploadPanel({
                 writeSavedTtl(kind, next, member);
               }}
               aria-label="Saklama süresi"
-              className="w-full min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+              className="w-full min-h-11 rounded-xl border border-sky-200 bg-white/80 px-3 text-sm dark:border-sky-800 dark:bg-slate-900/80"
             >
               {ttlOptionsFor(kind).map((option) => (
                 <option key={option.key} value={option.key}>
@@ -881,7 +881,7 @@ export function UploadPanel({
               <p className="mt-2 text-xs text-slate-500">Video ve ses en fazla 24 saat sonra yayından kalkar.</p>
             ) : !member ? (
               <p className="mt-2 text-xs text-slate-500">
-                Süreyi sen seçersin. Hiç silinmesin dersen{" "}
+                Hiç silinmesin istersen{" "}
                 <Link href="/kayit" className="text-violet-600">
                   üye ol
                 </Link>
@@ -889,7 +889,7 @@ export function UploadPanel({
               </p>
             ) : null}
           </label>
-          <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/35">
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Şifre koruması</span>
               <button
@@ -918,9 +918,7 @@ export function UploadPanel({
                   className="w-full min-h-11 rounded-xl border border-slate-200 px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
                 />
               </div>
-            ) : (
-              <p className="mt-3 text-sm text-slate-500">Açarsan linki açmak için şifre gerekir.</p>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
