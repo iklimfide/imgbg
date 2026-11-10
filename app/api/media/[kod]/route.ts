@@ -45,7 +45,7 @@ export async function GET(
   return new Response(object.stream, {
     headers: {
       "Content-Type": post.mime,
-      "Cache-Control": "private, no-store",
+      "Cache-Control": "private, max-age=604800, stale-while-revalidate=2592000",
     },
   });
 }

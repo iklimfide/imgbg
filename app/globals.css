@@ -43,6 +43,18 @@ html.mobile-preview body {
   transform: translateZ(0);
 }
 
+.gallery-shell {
+  container-type: inline-size;
+}
+
+@media (min-width: 1024px) {
+  html:not(.mobile-preview) .gallery-shell {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    padding-inline: 0.75rem;
+  }
+}
+
 details summary::-webkit-details-marker {
   display: none;
 }

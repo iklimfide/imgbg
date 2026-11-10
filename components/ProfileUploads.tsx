@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { CopyButton } from "@/components/CopyLink";
+import {
+  GalleryTile,
+  SORTS,
+  fileLabel,
+  galleryGridClass,
+  sortChipClass,
+  type GallerySort,
+} from "@/components/GalleryTile";
 import { ModalCloseButton } from "@/components/ModalCloseButton";
-import { DeletePostButton } from "@/components/DeletePostButton";
 import { MediaPreview } from "@/components/MediaPreview";
 
 export type ProfilePostCard = {
@@ -23,7 +30,7 @@ export type ProfilePostCard = {
   src: string;
 };
 
-const PAGE_SIZE = 20;
+const CHUNK = 12;
 
 const FILTERS = [
   { key: "all", label: "Tümü" },
@@ -34,56 +41,62 @@ const FILTERS = [
 
 type GalleryFilter = (typeof FILTERS)[number]["key"];
 
-function formatBytes(bytes: number) {
-  const mb = bytes / (1024 * 1024);
-  if (mb < 0.1) {
-    return `${(bytes / 1024).toFixed(1).replace(".", ",")} KB`;
+function sortPosts(posts: ProfilePostCard[], sort: GallerySort) {
+  const list = [...posts];
+  if (sort === "old") {
+    return list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
-  return `${mb.toFixed(mb >= 10 ? 1 : 2).replace(".", ",")} MB`;
-}
-
-function typeLabel(type: ProfilePostCard["type"]) {
-  if (type === "video") {
-    return "Video";
+  if (sort === "views") {
+    return list.sort((a, b) => b.views - a.views);
   }
-  if (type === "audio") {
-    return "Ses";
-  }
-  return "Resim";
-}
-
-function Thumb({ post }: { post: ProfilePostCard }) {
-  const src = post.src;
-  if (post.type === "video") {
-    return <video src={src} muted playsInline preload="metadata" className="h-full w-full object-cover" />;
-  }
-  if (post.type === "audio") {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-violet-100 text-lg text-violet-700 dark:bg-slate-800 dark:text-violet-300">
-        ♪
-      </div>
+  if (sort === "az") {
+    return list.sort((a, b) =>
+      fileLabel(a.originalName, a.id).localeCompare(fileLabel(b.originalName, b.id), "tr", { sensitivity: "base" }),
     );
   }
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt="" className="h-full w-full object-cover" />
-  );
+  return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export function ProfileUploads({ posts }: { posts: ProfilePostCard[] }) {
+export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[]; ownerName: string }) {
   const router = useRouter();
   const [open, setOpen] = useState<ProfilePostCard | null>(null);
-  const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<GalleryFilter>("all");
+  const [sort, setSort] = useState<GallerySort>("new");
   const [selected, setSelected] = useState<string[]>([]);
   const [askDelete, setAskDelete] = useState(false);
   const [busy, setBusy] = useState(false);
-  const filtered = filter === "all" ? posts : posts.filter((post) => post.type === filter);
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pages);
-  const slice = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const allOnPage = slice.length > 0 && slice.every((post) => selected.includes(post.id));
+  const [menu, setMenu] = useState(false);
+  const [shown, setShown] = useState(CHUNK);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const byType = filter === "all" ? posts : posts.filter((post) => post.type === filter);
+  const filtered = useMemo(() => sortPosts(byType, sort), [byType, sort]);
+  const visible = filtered.slice(0, shown);
+  const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
   const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
+  const heading =
+    filter === "video" ? `${ownerName}'in Videoları` : filter === "audio" ? `${ownerName}'in Sesleri` : `${ownerName}'in Resimleri`;
+
+  useEffect(() => {
+    setShown(CHUNK);
+    setSelected([]);
+  }, [filter, sort]);
+
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!node) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setShown((count) => Math.min(filtered.length, count + CHUNK));
+        }
+      },
+      { rootMargin: "800px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [filtered.length, shown]);
 
   useEffect(() => {
     if (!open) {
@@ -107,6 +120,7 @@ export function ProfileUploads({ posts }: { posts: ProfilePostCard[] }) {
       return;
     }
     setBusy(true);
+    setMenu(false);
     await Promise.all(
       ids.map((kod) =>
         fetch(`/api/posts/${kod}`, {
@@ -139,7 +153,8 @@ export function ProfileUploads({ posts }: { posts: ProfilePostCard[] }) {
 
   return (
     <>
-      <div className="space-y-3">
+      <div className="gallery-shell space-y-3">
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-white sm:text-xl">{heading}</h2>
         <div className="flex flex-nowrap gap-1">
           {FILTERS.map((item) => {
             const active = filter === item.key;
@@ -147,10 +162,7 @@ export function ProfileUploads({ posts }: { posts: ProfilePostCard[] }) {
               <button
                 key={item.key}
                 type="button"
-                onClick={() => {
-                  setFilter(item.key);
-                  setPage(1);
-                }}
+                onClick={() => setFilter(item.key)}
                 className={`min-h-7 min-w-0 flex-1 truncate rounded-lg px-1.5 text-[11px] font-medium sm:min-h-8 sm:flex-none sm:px-2.5 sm:text-xs ${
                   active
                     ? "bg-violet-600 text-white"
@@ -162,146 +174,85 @@ export function ProfileUploads({ posts }: { posts: ProfilePostCard[] }) {
             );
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={busy || selected.length === 0}
-            onClick={() => setAskDelete(true)}
-            className="min-h-9 rounded-lg bg-red-600 px-3 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
-          >
-            Sil
-          </button>
-          <CopyButton
-            text={selectedUrls.join("\n")}
-            compact
-            disabled={selectedUrls.length === 0}
-            label={`Toplu kopyala(${selectedUrls.length})`}
-          />
-          {pages > 1 ? (
-            <div className="flex flex-wrap gap-1">
-              {Array.from({ length: pages }, (_, index) => index + 1)
-                .slice(0, 20)
-                .map((number) => (
-                  <button
-                    key={number}
-                    type="button"
-                    onClick={() => setPage(number)}
-                    className={`inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg text-sm ${
-                      number === safePage
-                        ? "bg-sky-600 text-white"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-                    }`}
-                  >
-                    {number}
-                  </button>
-                ))}
-            </div>
-          ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1">
+            {SORTS.map((item) => (
+              <button key={item.key} type="button" onClick={() => setSort(item.key)} className={sortChipClass(sort === item.key)}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <div className="relative flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setSelected(allFiltered ? [] : filtered.map((post) => post.id))
+              }
+              className="text-sm font-medium text-sky-700 hover:underline dark:text-sky-300"
+            >
+              Hepsini seç
+            </button>
+            <button
+              type="button"
+              onClick={() => setMenu((value) => !value)}
+              className="text-sm font-medium text-slate-600 hover:underline dark:text-slate-300"
+            >
+              Eylemler ▾
+            </button>
+            {menu ? (
+              <div className="absolute right-0 top-8 z-30 min-w-[11rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  type="button"
+                  disabled={busy || selected.length === 0}
+                  onClick={() => {
+                    setMenu(false);
+                    setAskDelete(true);
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-40"
+                >
+                  Sil ({selected.length})
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || selected.length === 0}
+                  onClick={() => void setHidden(selected, true)}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-40 dark:hover:bg-slate-800"
+                >
+                  Gizle
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || selected.length === 0}
+                  onClick={() => void setHidden(selected, false)}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-40 dark:hover:bg-slate-800"
+                >
+                  Yayına al
+                </button>
+                <div className="px-2 py-1">
+                  <CopyButton text={selectedUrls.join("\n")} compact disabled={selectedUrls.length === 0} label={`Kopyala (${selectedUrls.length})`} />
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {filtered.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Bu türde yükleme yok.</p>
         ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <table className="min-w-[720px] w-full text-left text-sm">
-            <thead className="border-b border-slate-100 text-xs font-medium text-slate-500 dark:border-slate-800">
-              <tr>
-                <th className="w-10 px-3 py-3">
-                  <input
-                    type="checkbox"
-                    checked={allOnPage}
-                    onChange={() =>
-                      setSelected(
-                        allOnPage
-                          ? selected.filter((id) => !slice.some((post) => post.id === id))
-                          : [...new Set([...selected, ...slice.map((post) => post.id)])],
-                      )
-                    }
-                  />
-                </th>
-                <th className="px-3 py-3">Önizleme</th>
-                <th className="px-2 py-3">Durum</th>
-                <th className="px-2 py-3">Tarih</th>
-                <th className="px-2 py-3">Link</th>
-                <th className="px-2 py-3">Tür</th>
-                <th className="px-2 py-3">Boyut</th>
-                <th className="px-2 py-3">Görüntülenme</th>
-                <th className="px-2 py-3 text-right">İşlem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {slice.map((post) => (
-                <tr key={post.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-                  <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(post.id)}
-                      onChange={() =>
-                        setSelected((current) =>
-                          current.includes(post.id)
-                            ? current.filter((id) => id !== post.id)
-                            : [...current, post.id],
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => setOpen(post)}
-                      className={`h-14 w-14 overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-800 ${
-                        post.hiddenAt ? "opacity-50" : ""
-                      }`}
-                    >
-                      <Thumb post={post} />
-                    </button>
-                  </td>
-                  <td className="px-2 py-2 text-slate-500">{post.hiddenAt ? "Gizli" : "Yayında"}</td>
-                  <td className="whitespace-nowrap px-2 py-2 text-slate-600 dark:text-slate-300">
-                    {new Date(post.createdAt).toLocaleString("tr-TR", {
-                      day: "numeric",
-                      month: "numeric",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </td>
-                  <td className="px-2 py-2">
-                    <div className="flex min-w-0 max-w-[280px] items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setOpen(post)}
-                        className="min-w-0 truncate text-left text-sky-600 hover:underline"
-                      >
-                        {post.pageUrl}
-                      </button>
-                      <CopyButton text={post.pageUrl} compact />
-                    </div>
-                  </td>
-                  <td className="px-2 py-2">{typeLabel(post.type)}</td>
-                  <td className="whitespace-nowrap px-2 py-2">{formatBytes(post.size)}</td>
-                  <td className="whitespace-nowrap px-2 py-2">{post.views}</td>
-                  <td className="px-2 py-2 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void setHidden([post.id], !post.hiddenAt)}
-                        className={`inline-flex min-h-9 items-center rounded-lg px-2 text-sm font-medium text-white ${
-                          post.hiddenAt ? "bg-emerald-600 hover:bg-emerald-500" : "bg-amber-500 hover:bg-amber-400"
-                        }`}
-                      >
-                        {post.hiddenAt ? "Aç" : "Gizle"}
-                      </button>
-                      <DeletePostButton kod={post.id} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          <div className={galleryGridClass}>
+            {visible.map((post) => (
+              <GalleryTile
+                key={post.id}
+                selected={selected.includes(post.id)}
+                dimmed={Boolean(post.hiddenAt)}
+                type={post.type}
+                src={post.src}
+                onOpen={() => setOpen(post)}
+              />
+            ))}
+          </div>
         )}
+        <div ref={sentinel} className="h-8" />
       </div>
 
       <ConfirmModal

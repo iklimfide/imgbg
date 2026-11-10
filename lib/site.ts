@@ -1,4 +1,5 @@
 export const SITE_NAME = "imgBG.net";
+export const MEDIA_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
 export function getSiteUrl() {
   const url =

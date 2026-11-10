@@ -83,6 +83,7 @@ export default async function AdminPage() {
       deletedAt: iso(post.deletedAt),
       hiddenAt: iso(post.hiddenAt),
       expiresAt: iso(post.expiresAt),
+      views: post.views ?? 0,
       createdAt: iso(post.createdAt) ?? new Date().toISOString(),
       pageUrl: shareUrl(post.id, origin),
       src: publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash)),

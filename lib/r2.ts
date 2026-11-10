@@ -8,6 +8,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { MEDIA_CACHE_CONTROL } from "@/lib/site";
 
 function required(name: string) {
   const value = process.env[name];
@@ -82,6 +83,7 @@ export async function copyOnR2(fromKey: string, toKey: string, contentType: stri
         CopySource: encodeCopySource(fromKey),
         Key: toKey,
         ContentType: contentType,
+        CacheControl: MEDIA_CACHE_CONTROL,
         MetadataDirective: "REPLACE",
       }),
     );
@@ -105,6 +107,7 @@ export async function uploadToR2(key: string, body: Buffer, contentType: string)
       Key: key,
       Body: body,
       ContentType: contentType,
+      CacheControl: MEDIA_CACHE_CONTROL,
     }),
   );
 }
@@ -116,6 +119,7 @@ export async function signedPutUrl(key: string, contentType: string) {
       Bucket: bucket(),
       Key: key,
       ContentType: contentType,
+      CacheControl: MEDIA_CACHE_CONTROL,
     }),
     { expiresIn: 60 * 10 },
   );

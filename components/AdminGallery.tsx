@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { CopyButton } from "@/components/CopyLink";
+import {
+  GalleryTile,
+  SORTS,
+  fileLabel,
+  galleryGridClass,
+  sortChipClass,
+  type GallerySort,
+} from "@/components/GalleryTile";
 import { ModalCloseButton } from "@/components/ModalCloseButton";
 import { MediaPreview } from "@/components/MediaPreview";
 
@@ -22,12 +30,13 @@ export type AdminPostCard = {
   deletedAt: string | null;
   hiddenAt?: string | null;
   expiresAt: string | null;
+  views: number;
   createdAt: string;
   pageUrl: string;
   src: string;
 };
 
-const PAGE_SIZE = 20;
+const CHUNK = 12;
 
 const KIND_FILTERS = [
   { key: "all", label: "Tümü" },
@@ -59,43 +68,34 @@ function formatBytes(bytes: number) {
   return `${mb.toFixed(mb >= 10 ? 1 : 2).replace(".", ",")} MB`;
 }
 
-function typeLabel(type: AdminPostCard["type"]) {
-  if (type === "video") {
-    return "Video";
+function sortPosts(posts: AdminPostCard[], sort: GallerySort) {
+  const list = [...posts];
+  if (sort === "old") {
+    return list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
-  if (type === "audio") {
-    return "Ses";
+  if (sort === "views") {
+    return list.sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
   }
-  return "Resim";
-}
-
-function Thumb({ post }: { post: AdminPostCard }) {
-  const src = post.src;
-  if (post.type === "video") {
-    return <video src={src} muted playsInline preload="metadata" className="h-full w-full object-cover" />;
-  }
-  if (post.type === "audio") {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-violet-100 text-lg text-violet-700 dark:bg-slate-800 dark:text-violet-300">
-        ♪
-      </div>
+  if (sort === "az") {
+    return list.sort((a, b) =>
+      fileLabel(a.originalName, a.id).localeCompare(fileLabel(b.originalName, b.id), "tr", { sensitivity: "base" }),
     );
   }
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt="" className="h-full w-full object-cover" />
-  );
+  return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   const router = useRouter();
   const [open, setOpen] = useState<AdminPostCard | null>(null);
-  const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<"all" | "live" | "hidden">("all");
   const [kind, setKind] = useState<KindFilter>("all");
   const [owner, setOwner] = useState("all");
+  const [sort, setSort] = useState<GallerySort>("new");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [shown, setShown] = useState(CHUNK);
+  const sentinel = useRef<HTMLDivElement>(null);
   const [ask, setAsk] = useState<{ message: string; run: () => Promise<void> } | null>(null);
   const [saveNote, setSaveNote] = useState<{ text: string; url?: string } | null>(null);
 
@@ -115,7 +115,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   }, [posts]);
 
   const filtered = useMemo(() => {
-    return posts.filter((post) => {
+    const next = posts.filter((post) => {
       if (kind !== "all" && post.type !== kind) {
         return false;
       }
@@ -134,17 +134,36 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       }
       return true;
     });
-  }, [posts, filter, kind, owner]);
+    return sortPosts(next, sort);
+  }, [posts, filter, kind, owner, sort]);
 
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pages);
-  const slice = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const pageBytes = slice.reduce((sum, post) => sum + post.size, 0);
+  const visible = filtered.slice(0, shown);
   const allBytes = filtered.reduce((sum, post) => sum + post.size, 0);
+  const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
+  const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
 
   useEffect(() => {
+    setShown(CHUNK);
     setSelected([]);
-  }, [filter, kind, owner, safePage]);
+    setMenu(false);
+  }, [filter, kind, owner, sort]);
+
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!node) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setShown((count) => Math.min(filtered.length, count + CHUNK));
+        }
+      },
+      { rootMargin: "800px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [filtered.length, shown]);
 
   useEffect(() => {
     setSaveNote(null);
@@ -167,6 +186,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   async function saveToGallery(kod: string) {
     setBusy(true);
     setSaveNote(null);
+    setMenu(false);
     try {
       const response = await fetch(`/api/posts/${kod}/save`, { method: "POST" });
       const json = (await response.json().catch(() => null)) as {
@@ -223,17 +243,13 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
     router.refresh();
   }
 
-  const allOnPage = slice.length > 0 && slice.every((post) => selected.includes(post.id));
-
   return (
     <>
-      <div className="space-y-3">
+      <div className="gallery-shell space-y-3">
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold text-slate-800 dark:text-white">Yüklemeler</h1>
-          <p className="text-sm text-slate-500">Kullanıcıya kapalı kayıtlar da burada durur.</p>
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            Bu sayfa: {formatBytes(pageBytes)}
-            <span className="ml-2 font-normal text-slate-400">· toplam {formatBytes(allBytes)}</span>
+          <p className="text-sm text-slate-500">
+            Kullanıcıya kapalı kayıtlar da burada durur · toplam {formatBytes(allBytes)} · {filtered.length}
           </p>
           {saveNote ? (
             <p className="text-sm text-violet-700 dark:text-violet-300">
@@ -257,10 +273,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
               <button
                 key={item.key}
                 type="button"
-                onClick={() => {
-                  setKind(item.key);
-                  setPage(1);
-                }}
+                onClick={() => setKind(item.key)}
                 className={`min-h-7 min-w-0 flex-1 truncate rounded-lg px-1.5 text-[11px] font-medium sm:min-h-8 sm:flex-none sm:px-2.5 sm:text-xs ${
                   active
                     ? "bg-violet-600 text-white"
@@ -274,30 +287,9 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-1">
-            {Array.from({ length: pages }, (_, index) => index + 1)
-              .slice(0, 20)
-              .map((number) => (
-                <button
-                  key={number}
-                  type="button"
-                  onClick={() => setPage(number)}
-                  className={`inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg text-sm ${
-                    number === safePage
-                      ? "bg-sky-600 text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-                  }`}
-                >
-                  {number}
-                </button>
-              ))}
-          </div>
           <select
             value={owner}
-            onChange={(event) => {
-              setOwner(event.target.value);
-              setPage(1);
-            }}
+            onChange={(event) => setOwner(event.target.value)}
             className="min-h-9 max-w-[12rem] rounded-lg border border-slate-200 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
             aria-label="Kullanıcı"
           >
@@ -310,159 +302,71 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           </select>
           <select
             value={filter}
-            onChange={(event) => {
-              setFilter(event.target.value as typeof filter);
-              setPage(1);
-            }}
+            onChange={(event) => setFilter(event.target.value as typeof filter)}
             className="min-h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
           >
             <option value="all">Tümü</option>
             <option value="live">Yayında</option>
             <option value="hidden">Gizli</option>
           </select>
-          <span className="text-sm text-slate-500">{filtered.length}</span>
-          <button
-            type="button"
-            onClick={() => setSelected(allOnPage ? [] : slice.map((post) => post.id))}
-            className="min-h-9 rounded-lg border border-slate-200 px-3 text-sm dark:border-slate-700"
-          >
-            Tümünü seç
-          </button>
-          <button
-            type="button"
-            disabled={busy || selected.length === 0}
-            onClick={() =>
-              setAsk({
-                message: `${selected.length} kaydı kalıcı silmek istiyor musun?`,
-                run: purgeSelected,
-              })
-            }
-            className="min-h-9 rounded-lg border border-red-300 px-3 text-sm text-red-600 disabled:opacity-50"
-          >
-            Tümünü sil
-          </button>
         </div>
 
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <table className="min-w-[920px] w-full text-left text-sm">
-            <thead className="border-b border-slate-100 text-xs font-medium text-slate-500 dark:border-slate-800">
-              <tr>
-                <th className="w-10 px-3 py-3">
-                  <input
-                    type="checkbox"
-                    checked={allOnPage}
-                    onChange={() => setSelected(allOnPage ? [] : slice.map((post) => post.id))}
-                  />
-                </th>
-                <th className="px-2 py-3">Önizleme</th>
-                <th className="px-2 py-3">Durum</th>
-                <th className="px-2 py-3">Kim</th>
-                <th className="px-2 py-3">Tarih</th>
-                <th className="px-2 py-3">Link</th>
-                <th className="px-2 py-3">Tür</th>
-                <th className="px-2 py-3">Boyut</th>
-                <th className="px-2 py-3 text-right">İşlem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {slice.map((post) => {
-                const status = statusOf(post);
-                return (
-                  <tr key={post.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(post.id)}
-                        onChange={() =>
-                          setSelected((current) =>
-                            current.includes(post.id)
-                              ? current.filter((id) => id !== post.id)
-                              : [...current, post.id],
-                          )
-                        }
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setOpen(post)}
-                        className="h-14 w-14 overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-800"
-                      >
-                        <Thumb post={post} />
-                      </button>
-                    </td>
-                    <td className="px-2 py-2 text-slate-500">{status.hidden ? status.label : "—"}</td>
-                    <td className="px-2 py-2">
-                      {post.holders.length > 0
-                        ? post.holders.map((holder) => holder.name).join(", ")
-                        : (post.ownerName ?? "Misafir")}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 text-slate-600 dark:text-slate-300">
-                      {new Date(post.createdAt).toLocaleString("tr-TR", {
-                        day: "numeric",
-                        month: "numeric",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="px-2 py-2">
-                      <div className="flex min-w-0 max-w-[280px] items-center gap-2">
-                        <Link href={post.pageUrl} className="min-w-0 truncate text-sky-600 hover:underline">
-                          {post.pageUrl}
-                        </Link>
-                        <CopyButton text={post.pageUrl} compact />
-                      </div>
-                    </td>
-                    <td className="px-2 py-2">{typeLabel(post.type)}</td>
-                    <td className="whitespace-nowrap px-2 py-2">{formatBytes(post.size)}</td>
-                    <td className="px-2 py-2">
-                      <div className="flex justify-end gap-1">
-                        {post.type === "image" || post.type === "video" ? (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            title="Galerime ekle"
-                            onClick={() => void saveToGallery(post.id)}
-                            className="inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-950/50"
-                          >
-                            Galerim
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          disabled={busy}
-                          title="Geri getir"
-                          onClick={() => void run(post.id, "restore")}
-                          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-sky-600 hover:bg-sky-50 disabled:opacity-50"
-                        >
-                          ↩
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          title="Kalıcı sil"
-                          onClick={() =>
-                            setAsk({
-                              message: "Bu kaydı kalıcı silmek istiyor musun?",
-                              run: async () => {
-                                await run(post.id, "purge");
-                                setAsk(null);
-                              },
-                            })
-                          }
-                          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-50"
-                        >
-                          ⌫
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1">
+            {SORTS.map((item) => (
+              <button key={item.key} type="button" onClick={() => setSort(item.key)} className={sortChipClass(sort === item.key)}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <div className="relative flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
+              className="text-sm font-medium text-sky-700 hover:underline dark:text-sky-300"
+            >
+              Hepsini seç
+            </button>
+            <button type="button" onClick={() => setMenu((value) => !value)} className="text-sm font-medium text-slate-600 hover:underline dark:text-slate-300">
+              Eylemler ▾
+            </button>
+            {menu ? (
+              <div className="absolute right-0 top-8 z-30 min-w-[12rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  type="button"
+                  disabled={busy || selected.length === 0}
+                  onClick={() => {
+                    setMenu(false);
+                    setAsk({
+                      message: `${selected.length} kaydı kalıcı silmek istiyor musun?`,
+                      run: purgeSelected,
+                    });
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-40"
+                >
+                  Kalıcı sil ({selected.length})
+                </button>
+                <div className="px-2 py-1">
+                  <CopyButton text={selectedUrls.join("\n")} compact disabled={selectedUrls.length === 0} label={`Kopyala (${selectedUrls.length})`} />
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
+
+        <div className={galleryGridClass}>
+          {visible.map((post) => (
+            <GalleryTile
+              key={post.id}
+              selected={selected.includes(post.id)}
+              dimmed={statusOf(post).hidden}
+              type={post.type}
+              src={post.src}
+              onOpen={() => setOpen(post)}
+            />
+          ))}
+        </div>
+        <div ref={sentinel} className="h-8" />
       </div>
 
       {open ? (
@@ -482,6 +386,9 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                 <p className="min-w-0 truncate text-sm text-sky-600 sm:text-base">{open.pageUrl}</p>
                 <CopyButton text={open.pageUrl} compact />
               </div>
+              <p className="mb-3 text-sm text-slate-500">
+                {open.holders.length > 0 ? open.holders.map((holder) => holder.name).join(", ") : (open.ownerName ?? "Misafir")}
+              </p>
               <MediaPreview type={open.type} src={open.src} />
               {open.type === "image" || open.type === "video" ? (
                 <div className="mt-4 space-y-2">
@@ -508,6 +415,32 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                   ) : null}
                 </div>
               ) : null}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run(open.id, "restore")}
+                  className="min-h-10 flex-1 rounded-xl bg-sky-50 text-sm text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
+                >
+                  Geri getir
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    setAsk({
+                      message: "Bu kaydı kalıcı silmek istiyor musun?",
+                      run: async () => {
+                        await run(open.id, "purge");
+                        setAsk(null);
+                      },
+                    })
+                  }
+                  className="min-h-10 flex-1 rounded-xl bg-red-50 text-sm text-red-600"
+                >
+                  Kalıcı sil
+                </button>
+              </div>
             </div>
           </div>
         </div>

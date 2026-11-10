@@ -10,7 +10,7 @@ import { ShareSuccessModal, type ShareResult } from "@/components/ShareSuccessMo
 import { UploadProgressModal } from "@/components/UploadProgressModal";
 import { fileLimit, formatMb, ttlOptionsFor } from "@/lib/quota";
 import { normalizeHttpUrl, readSeenLinks, rememberSeenLinks } from "@/lib/seen-links";
-import type { MediaKind } from "@/lib/site";
+import { MEDIA_CACHE_CONTROL, type MediaKind } from "@/lib/site";
 
 const ACCEPT: Record<MediaKind, string> = {
   image: "image/jpeg,image/png,image/webp,image/gif",
@@ -173,6 +173,7 @@ function putWithXhr(
     assignXhr(xhr);
     xhr.open("PUT", url);
     xhr.setRequestHeader("Content-Type", contentType || "application/octet-stream");
+    xhr.setRequestHeader("Cache-Control", MEDIA_CACHE_CONTROL);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress(event.loaded, event.total);
