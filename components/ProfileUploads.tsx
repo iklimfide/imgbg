@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { CopyButton } from "@/components/CopyLink";
+import { ModalCloseButton } from "@/components/ModalCloseButton";
 import { DeletePostButton } from "@/components/DeletePostButton";
 import { MediaPreview } from "@/components/MediaPreview";
 
@@ -318,24 +319,17 @@ export function ProfileUploads({ posts }: { posts: ProfilePostCard[] }) {
           <div
             role="dialog"
             aria-modal="true"
-            className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white p-4 shadow-2xl dark:bg-slate-900 sm:p-6"
+            className="relative max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-slate-900"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-center gap-2">
+            <ModalCloseButton onClick={() => setOpen(null)} />
+            <div className="max-h-[92vh] overflow-y-auto p-4 pr-16 sm:p-6 sm:pr-20">
+              <div className="mb-3 flex min-w-0 items-center gap-2">
                 <p className="min-w-0 truncate text-sm text-sky-600 sm:text-base">{open.pageUrl}</p>
                 <CopyButton text={open.pageUrl} compact />
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(null)}
-                className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
-                aria-label="Kapat"
-              >
-                ×
-              </button>
+              <MediaPreview type={open.type} src={open.src} />
             </div>
-            <MediaPreview type={open.type} src={open.src} />
           </div>
         </div>
       ) : null}

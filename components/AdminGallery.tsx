@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { CopyButton } from "@/components/CopyLink";
+import { ModalCloseButton } from "@/components/ModalCloseButton";
 import { MediaPreview } from "@/components/MediaPreview";
 
 export type AdminPostCard = {
   id: string;
+  userId: string | null;
+  holders: { id: string; name: string }[];
   type: "image" | "video" | "audio";
   r2Key: string;
   mime: string;
@@ -90,14 +93,37 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<"all" | "live" | "hidden">("all");
   const [kind, setKind] = useState<KindFilter>("all");
+  const [owner, setOwner] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [ask, setAsk] = useState<{ message: string; run: () => Promise<void> } | null>(null);
+  const [saveNote, setSaveNote] = useState<{ text: string; url?: string } | null>(null);
+
+  const owners = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const post of posts) {
+      const list = post.holders.length
+        ? post.holders
+        : [{ id: post.userId ?? "guest", name: post.ownerName?.trim() || (post.userId ? "Üye" : "Misafir") }];
+      for (const holder of list) {
+        if (!map.has(holder.id)) {
+          map.set(holder.id, holder.name);
+        }
+      }
+    }
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "tr"));
+  }, [posts]);
 
   const filtered = useMemo(() => {
     return posts.filter((post) => {
       if (kind !== "all" && post.type !== kind) {
         return false;
+      }
+      if (owner !== "all") {
+        const ids = post.holders.length ? post.holders.map((holder) => holder.id) : [post.userId ?? "guest"];
+        if (!ids.includes(owner)) {
+          return false;
+        }
       }
       const hidden = statusOf(post).hidden;
       if (filter === "live") {
@@ -108,7 +134,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       }
       return true;
     });
-  }, [posts, filter, kind]);
+  }, [posts, filter, kind, owner]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
@@ -118,9 +144,10 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
 
   useEffect(() => {
     setSelected([]);
-  }, [filter, kind, safePage]);
+  }, [filter, kind, owner, safePage]);
 
   useEffect(() => {
+    setSaveNote(null);
     if (!open) {
       return;
     }
@@ -136,6 +163,31 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       document.body.style.overflow = "";
     };
   }, [open]);
+
+  async function saveToGallery(kod: string) {
+    setBusy(true);
+    setSaveNote(null);
+    try {
+      const response = await fetch(`/api/posts/${kod}/save`, { method: "POST" });
+      const json = (await response.json().catch(() => null)) as {
+        error?: string;
+        url?: string;
+        already?: boolean;
+      } | null;
+      if (!response.ok || !json?.url) {
+        setSaveNote({ text: json?.error ?? "Galerine eklenemedi." });
+        return;
+      }
+      setSaveNote({
+        text: json.already ? "Zaten galerinde" : "Galerine eklendi",
+        url: json.url,
+      });
+    } catch {
+      setSaveNote({ text: "Galerine eklenemedi." });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function run(kod: string, action: "restore" | "hide" | "purge") {
     setBusy(true);
@@ -183,6 +235,19 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
             Bu sayfa: {formatBytes(pageBytes)}
             <span className="ml-2 font-normal text-slate-400">· toplam {formatBytes(allBytes)}</span>
           </p>
+          {saveNote ? (
+            <p className="text-sm text-violet-700 dark:text-violet-300">
+              {saveNote.text}
+              {saveNote.url ? (
+                <>
+                  {" · "}
+                  <Link href={saveNote.url} className="underline">
+                    {saveNote.url}
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-nowrap gap-1">
@@ -227,6 +292,22 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                 </button>
               ))}
           </div>
+          <select
+            value={owner}
+            onChange={(event) => {
+              setOwner(event.target.value);
+              setPage(1);
+            }}
+            className="min-h-9 max-w-[12rem] rounded-lg border border-slate-200 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+            aria-label="Kullanıcı"
+          >
+            <option value="all">Tüm kullanıcılar</option>
+            {owners.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
           <select
             value={filter}
             onChange={(event) => {
@@ -311,7 +392,11 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                       </button>
                     </td>
                     <td className="px-2 py-2 text-slate-500">{status.hidden ? status.label : "—"}</td>
-                    <td className="px-2 py-2">{post.ownerName ?? "Misafir"}</td>
+                    <td className="px-2 py-2">
+                      {post.holders.length > 0
+                        ? post.holders.map((holder) => holder.name).join(", ")
+                        : (post.ownerName ?? "Misafir")}
+                    </td>
                     <td className="whitespace-nowrap px-2 py-2 text-slate-600 dark:text-slate-300">
                       {new Date(post.createdAt).toLocaleString("tr-TR", {
                         day: "numeric",
@@ -333,6 +418,17 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                     <td className="whitespace-nowrap px-2 py-2">{formatBytes(post.size)}</td>
                     <td className="px-2 py-2">
                       <div className="flex justify-end gap-1">
+                        {post.type === "image" || post.type === "video" ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            title="Galerime ekle"
+                            onClick={() => void saveToGallery(post.id)}
+                            className="inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-950/50"
+                          >
+                            Galerim
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           disabled={busy}
@@ -377,24 +473,42 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           <div
             role="dialog"
             aria-modal="true"
-            className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white p-4 shadow-2xl dark:bg-slate-900 sm:p-6"
+            className="relative max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-slate-900"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-center gap-2">
+            <ModalCloseButton onClick={() => setOpen(null)} />
+            <div className="max-h-[92vh] overflow-y-auto p-4 pr-16 sm:p-6 sm:pr-20">
+              <div className="mb-3 flex min-w-0 items-center gap-2">
                 <p className="min-w-0 truncate text-sm text-sky-600 sm:text-base">{open.pageUrl}</p>
                 <CopyButton text={open.pageUrl} compact />
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(null)}
-                className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
-                aria-label="Kapat"
-              >
-                ×
-              </button>
+              <MediaPreview type={open.type} src={open.src} />
+              {open.type === "image" || open.type === "video" ? (
+                <div className="mt-4 space-y-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void saveToGallery(open.id)}
+                    className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-violet-600 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
+                  >
+                    {busy ? "Ekleniyor..." : "Galerime ekle"}
+                  </button>
+                  {saveNote ? (
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      {saveNote.text}
+                      {saveNote.url ? (
+                        <>
+                          {" · "}
+                          <Link href={saveNote.url} className="text-sky-600 underline">
+                            {saveNote.url}
+                          </Link>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-            <MediaPreview type={open.type} src={open.src} />
           </div>
         </div>
       ) : null}

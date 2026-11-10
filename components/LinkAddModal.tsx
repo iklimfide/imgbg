@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ModalCloseButton } from "@/components/ModalCloseButton";
 import { parseHttpUrls } from "@/lib/http-urls";
 
 export function LinkAddModal({
@@ -80,9 +81,17 @@ export function LinkAddModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="link-modal-title"
-        className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900"
+        className="relative w-full max-w-md rounded-3xl bg-white p-6 pr-16 shadow-2xl dark:bg-slate-900"
         onClick={(event) => event.stopPropagation()}
       >
+        <ModalCloseButton
+          disabled={pending}
+          onClick={() => {
+            if (!pending) {
+              onClose();
+            }
+          }}
+        />
         <p id="link-modal-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
           {pending ? (paused ? "Duraklatıldı" : "Alınıyor") : "Linkten ekle"}
         </p>

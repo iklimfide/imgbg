@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { posts, type Post } from "@/db/schema";
 import { deleteFromR2, isR2Configured } from "@/lib/r2";
@@ -39,11 +39,14 @@ export async function usedStorage(params: { userId?: string; guestKey?: string }
     ? eq(posts.userId, params.userId)
     : eq(posts.guestKey, params.guestKey ?? "");
 
+  const prefix = params.userId
+    ? `uploads/${params.userId}/%`
+    : `uploads/guest/${params.guestKey ?? ""}/%`;
   const db = await getDb();
   const [row] = await db
     .select({ total: sql<number>`coalesce(sum(${posts.size}), 0)` })
     .from(posts)
-    .where(and(owner, publiclyVisible));
+    .where(and(owner, publiclyVisible, sql`${posts.r2Key} like ${prefix}`));
 
   return Number(row?.total ?? 0);
 }
@@ -91,10 +94,15 @@ export async function purgePost(kod: string) {
   if (!post) {
     return false;
   }
-  if (isR2Configured()) {
+  const db = await getDb();
+  const [shared] = await db
+    .select({ id: posts.id })
+    .from(posts)
+    .where(and(eq(posts.r2Key, post.r2Key), ne(posts.id, kod)))
+    .limit(1);
+  if (!shared && isR2Configured()) {
     await deleteFromR2(post.r2Key).catch(() => undefined);
   }
-  const db = await getDb();
   await db.delete(posts).where(eq(posts.id, kod));
   return true;
 }

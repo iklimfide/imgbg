@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -67,6 +68,34 @@ export function ensureR2Cors() {
       corsReady = null;
     });
   return corsReady;
+}
+
+function encodeCopySource(key: string) {
+  return `${bucket()}/${key.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+export async function copyOnR2(fromKey: string, toKey: string, contentType: string) {
+  try {
+    await client().send(
+      new CopyObjectCommand({
+        Bucket: bucket(),
+        CopySource: encodeCopySource(fromKey),
+        Key: toKey,
+        ContentType: contentType,
+        MetadataDirective: "REPLACE",
+      }),
+    );
+    return;
+  } catch {
+    const object = await client().send(
+      new GetObjectCommand({
+        Bucket: bucket(),
+        Key: fromKey,
+      }),
+    );
+    const bytes = object.Body ? await object.Body.transformToByteArray() : new Uint8Array();
+    await uploadToR2(toKey, Buffer.from(bytes), contentType);
+  }
 }
 
 export async function uploadToR2(key: string, body: Buffer, contentType: string) {

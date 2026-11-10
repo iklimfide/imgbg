@@ -8,9 +8,11 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 export function HeaderMenu({
   signedIn,
   isAdmin,
+  username,
 }: {
   signedIn: boolean;
   isAdmin: boolean;
+  username?: string;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -39,6 +41,11 @@ export function HeaderMenu({
 
   return (
     <div className="flex min-w-0 items-center gap-2">
+      {signedIn && username ? (
+        <span className="max-w-[9rem] truncate text-sm font-medium text-slate-700 dark:text-slate-200 sm:max-w-[14rem]">
+          {username}
+        </span>
+      ) : null}
       <div className="relative" ref={rootRef}>
         <button
           type="button"

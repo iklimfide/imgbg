@@ -56,20 +56,40 @@ export async function pingD1() {
   await d1Raw("SELECT 1", []);
 }
 
+const ALBUM_SQL = [
+  `CREATE TABLE IF NOT EXISTS albums (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS albums_userId_idx ON albums(user_id)`,
+  `CREATE TABLE IF NOT EXISTS album_items (
+    album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (album_id, post_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS album_items_postId_idx ON album_items(post_id)`,
+];
+
 export async function ensureD1Schema() {
   const existing = await d1Raw(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'",
     [],
   );
-  if (existing.length > 0) {
+  if (existing.length === 0) {
+    const sql = readFileSync(join(process.cwd(), "drizzle", "0001_init.sql"), "utf8");
+    const statements = sql
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    for (const statement of statements) {
+      await d1Raw(statement, []);
+    }
     return;
   }
-  const sql = readFileSync(join(process.cwd(), "drizzle", "0001_init.sql"), "utf8");
-  const statements = sql
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  for (const statement of statements) {
+  for (const statement of ALBUM_SQL) {
     await d1Raw(statement, []);
   }
 }

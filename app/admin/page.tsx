@@ -36,22 +36,58 @@ export default async function AdminPage() {
     .orderBy(desc(posts.createdAt))
     .limit(400);
 
-  const cards: AdminPostCard[] = items.map(({ post, ownerName }) => ({
-    id: post.id,
-    type: post.type,
-    r2Key: post.r2Key,
-    mime: post.mime,
-    size: post.size,
-    originalName: post.originalName,
-    ownerName,
-    passwordHash: post.passwordHash,
-    deletedAt: iso(post.deletedAt),
-    hiddenAt: iso(post.hiddenAt),
-    expiresAt: iso(post.expiresAt),
-    createdAt: iso(post.createdAt) ?? new Date().toISOString(),
-    pageUrl: shareUrl(post.id, origin),
-    src: publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash)),
-  }));
+  function holderLabel(name: string | null, userId: string | null) {
+    const trimmed = name?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+    return userId ? "Üye" : "Misafir";
+  }
+
+  const holdersByFile = new Map<string, { id: string; name: string }[]>();
+  const originalByFile = new Map<string, (typeof items)[number]>();
+  for (const item of [...items].reverse()) {
+    const file = item.post.r2Key;
+    const id = item.post.userId ?? "guest";
+    const name = holderLabel(item.ownerName, item.post.userId);
+    const holders = holdersByFile.get(file) ?? [];
+    if (!holders.some((holder) => holder.id === id)) {
+      holders.push({ id, name });
+    }
+    holdersByFile.set(file, holders);
+    originalByFile.set(file, item);
+  }
+
+  const seen = new Set<string>();
+  const cards: AdminPostCard[] = [];
+  for (const item of items) {
+    if (seen.has(item.post.r2Key)) {
+      continue;
+    }
+    seen.add(item.post.r2Key);
+    const { post, ownerName } = originalByFile.get(item.post.r2Key) ?? item;
+    const holders = holdersByFile.get(post.r2Key) ?? [
+      { id: post.userId ?? "guest", name: holderLabel(ownerName, post.userId) },
+    ];
+    cards.push({
+      id: post.id,
+      userId: post.userId,
+      holders,
+      type: post.type,
+      r2Key: post.r2Key,
+      mime: post.mime,
+      size: post.size,
+      originalName: post.originalName,
+      ownerName: holders.map((holder) => holder.name).join(", "),
+      passwordHash: post.passwordHash,
+      deletedAt: iso(post.deletedAt),
+      hiddenAt: iso(post.hiddenAt),
+      expiresAt: iso(post.expiresAt),
+      createdAt: iso(post.createdAt) ?? new Date().toISOString(),
+      pageUrl: shareUrl(post.id, origin),
+      src: publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash)),
+    });
+  }
 
   return <AdminGallery posts={cards} />;
 }

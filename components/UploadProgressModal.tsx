@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalCloseButton } from "@/components/ModalCloseButton";
+
 export function UploadProgressModal({
   open,
   percent,
@@ -31,8 +33,9 @@ export function UploadProgressModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="upload-progress-title"
-        className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl ring-1 ring-sky-200 dark:bg-slate-900 dark:ring-slate-700"
+        className="relative w-full max-w-sm rounded-3xl bg-white p-6 pr-16 text-center shadow-2xl ring-1 ring-sky-200 dark:bg-slate-900 dark:ring-slate-700"
       >
+        <ModalCloseButton onClick={onCancel} />
         <p id="upload-progress-title" className="text-lg font-medium text-slate-800 dark:text-slate-100">
           {paused ? "Duraklatıldı" : "Yükleniyor"}
         </p>

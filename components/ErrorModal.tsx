@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalCloseButton } from "@/components/ModalCloseButton";
+
 export function ErrorModal({
   message,
   onClose,
@@ -17,9 +19,10 @@ export function ErrorModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="error-modal-title"
-        className="w-full max-w-lg rounded-3xl bg-white p-6 text-left shadow-2xl ring-1 ring-red-100 dark:bg-slate-900 dark:ring-red-900/40"
+        className="relative w-full max-w-lg rounded-3xl bg-white p-6 pr-16 text-left shadow-2xl ring-1 ring-red-100 dark:bg-slate-900 dark:ring-red-900/40"
         onClick={(event) => event.stopPropagation()}
       >
+        <ModalCloseButton onClick={onClose} />
         <p id="error-modal-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
           Hata
         </p>

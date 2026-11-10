@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { ModalCloseButton } from "@/components/ModalCloseButton";
 import { BulkShareCodes, ShareCodes } from "@/components/ShareCodes";
 import { mediaShareUrl } from "@/lib/share-codes";
 
@@ -81,24 +82,16 @@ export function ShareSuccessModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="share-modal-title"
-        className="@container max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-4 shadow-2xl dark:bg-slate-900 @min-[40rem]:p-6"
+        className="@container relative max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-slate-900"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <p id="share-modal-title" className="text-lg font-semibold text-slate-900 dark:text-white">
-              {items.length === 0 ? "Tümü silindi" : "Paylaşım hazır"}
-            </p>
-            {note && items.length > 0 ? <p className="mt-1 text-sm text-slate-500">{note}</p> : null}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
-            aria-label="Kapat"
-          >
-            ×
-          </button>
+        <ModalCloseButton onClick={onClose} />
+        <div className="max-h-[92vh] overflow-y-auto p-4 pr-16 @min-[40rem]:p-6 @min-[40rem]:pr-20">
+        <div className="mb-4">
+          <p id="share-modal-title" className="text-lg font-semibold text-slate-900 dark:text-white">
+            {items.length === 0 ? "Tümü silindi" : "Paylaşım hazır"}
+          </p>
+          {note && items.length > 0 ? <p className="mt-1 text-sm text-slate-500">{note}</p> : null}
         </div>
 
         {items.length === 0 ? (
@@ -154,6 +147,7 @@ export function ShareSuccessModal({
           </ul>
           </>
         )}
+        </div>
       </div>
       <ConfirmModal
         open={Boolean(askDelete)}
@@ -174,13 +168,11 @@ export function ShareSuccessModal({
             setEnlarged(null);
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={enlarged.preview}
-            alt=""
-            className="max-h-[90vh] max-w-full rounded-2xl object-contain shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          />
+          <div className="relative max-h-[90vh] max-w-full" onClick={(event) => event.stopPropagation()}>
+            <ModalCloseButton onClick={() => setEnlarged(null)} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={enlarged.preview} alt="" className="max-h-[90vh] max-w-full rounded-2xl object-contain shadow-2xl" />
+          </div>
         </div>
       ) : null}
     </div>

@@ -12,7 +12,13 @@ type Mode = "giris" | "kayit";
 const fieldClass =
   "w-full min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base dark:border-slate-700 dark:bg-slate-900";
 
-export function AuthForm({ mode }: { mode: Mode }) {
+export function AuthForm({
+  mode,
+  onSuccess,
+}: {
+  mode: Mode;
+  onSuccess?: () => void | Promise<void>;
+}) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -42,19 +48,22 @@ export function AuthForm({ mode }: { mode: Mode }) {
         mode === "kayit"
           ? await authClient.signUp.email({ email, password, name })
           : await authClient.signIn.email({ email, password });
-      setPending(false);
       if (result.error) {
+        setPending(false);
         setError(authErrorTr(result.error, mode));
         return;
       }
+      if (onSuccess) {
+        await onSuccess();
+      } else {
+        router.push("/");
+      }
+      router.refresh();
     } catch (cause) {
-      setPending(false);
       setError(authErrorTr(cause, mode));
-      return;
+    } finally {
+      setPending(false);
     }
-
-    router.push("/");
-    router.refresh();
   }
 
   return (

@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalCloseButton } from "@/components/ModalCloseButton";
+
 export function ConfirmModal({
   open,
   title = "Onay",
@@ -35,9 +37,10 @@ export function ConfirmModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-modal-title"
-        className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl dark:bg-slate-900"
+        className="relative w-full max-w-sm rounded-3xl bg-white p-6 pr-16 text-center shadow-2xl dark:bg-slate-900"
         onClick={(event) => event.stopPropagation()}
       >
+        <ModalCloseButton disabled={pending} onClick={onCancel} />
         <p id="confirm-modal-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
           {title}
         </p>

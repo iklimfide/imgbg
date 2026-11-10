@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { MediaView } from "@/components/MediaView";
+import { SaveToGallery } from "@/components/SaveToGallery";
 import { SharePromo } from "@/components/SharePromo";
 import { UnlockForm } from "@/components/UnlockForm";
 import { isAdminEmail } from "@/lib/admin";
@@ -110,6 +111,9 @@ export default async function PaylasimPage({
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 sm:space-y-5">
       <MediaView post={post} />
+      {!adminOnly ? (
+        <SaveToGallery kod={kod} signedIn={Boolean(session?.user)} owned={isOwner} />
+      ) : null}
       <SharePromo />
       {adminOnly ? (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
