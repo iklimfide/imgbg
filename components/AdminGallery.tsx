@@ -5,16 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { GalleryBulkBar } from "@/components/GalleryBulkBar";
-import {
-  GALLERY_CHUNK,
-  GalleryLoadMore,
-  GalleryTile,
-  SORTS,
-  fileLabel,
-  galleryGridClass,
-  sortChipClass,
-  type GallerySort,
-} from "@/components/GalleryTile";
+import { GalleryListTable, compareGalleryItems, type GallerySort } from "@/components/GalleryTile";
 import { MediaEditPanel } from "@/components/MediaEditPanel";
 import { MediaPreview } from "@/components/MediaPreview";
 import { ModalCloseButton } from "@/components/ModalCloseButton";
@@ -73,19 +64,7 @@ function formatBytes(bytes: number) {
 }
 
 function sortPosts(posts: AdminPostCard[], sort: GallerySort) {
-  const list = [...posts];
-  if (sort === "old") {
-    return list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-  if (sort === "views") {
-    return list.sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-  }
-  if (sort === "az") {
-    return list.sort((a, b) =>
-      fileLabel(a.originalName, a.id).localeCompare(fileLabel(b.originalName, b.id), "tr", { sensitivity: "base" }),
-    );
-  }
-  return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return [...posts].sort((a, b) => compareGalleryItems(a, b, sort));
 }
 
 export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
@@ -94,11 +73,10 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   const [filter, setFilter] = useState<"all" | "live" | "hidden">("all");
   const [kind, setKind] = useState<KindFilter>("all");
   const [owner, setOwner] = useState("all");
-  const [sort, setSort] = useState<GallerySort>("new");
+  const [sort, setSort] = useState<GallerySort>({ key: "date", dir: "desc" });
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [shown, setShown] = useState(GALLERY_CHUNK);
   const [saveNote, setSaveNote] = useState<{ text: string; url?: string } | null>(null);
   const [ask, setAsk] = useState<{ message: string; run: () => Promise<void> } | null>(null);
 
@@ -143,14 +121,12 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
     return sortPosts(next, sort);
   }, [posts, filter, kind, owner, sort, tagFilter]);
 
-  const visible = filtered.slice(0, shown);
   const allBytes = filtered.reduce((sum, post) => sum + post.size, 0);
   const tags = uniqueTags(posts);
   const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
   const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
 
   useEffect(() => {
-    setShown(GALLERY_CHUNK);
     setSelected([]);
   }, [filter, kind, owner, sort, tagFilter]);
 
@@ -337,28 +313,28 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
 
   return (
     <>
-      <div className="gallery-shell space-y-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold text-slate-800 dark:text-white">Yüklemeler</h1>
-          <p className="text-sm text-slate-500">
-            Kullanıcıya kapalı kayıtlar da burada durur · toplam {formatBytes(allBytes)} · {filtered.length}
-          </p>
-          {saveNote ? (
-            <p className="text-sm text-violet-700 dark:text-violet-300">
-              {saveNote.text}
-              {saveNote.url ? (
-                <>
-                  {" · "}
-                  <Link href={saveNote.url} className="underline">
-                    {saveNote.url}
-                  </Link>
-                </>
-              ) : null}
-            </p>
-          ) : null}
+      <div className="space-y-3">
+        <div className="gallery-toolbar space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-white sm:text-lg">Yüklemeler</h1>
+          <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+            {filtered.length} · {formatBytes(allBytes)}
+          </span>
         </div>
-
-        <div className="flex flex-nowrap gap-1">
+        {saveNote ? (
+          <p className="text-xs text-violet-700 dark:text-violet-300">
+            {saveNote.text}
+            {saveNote.url ? (
+              <>
+                {" · "}
+                <Link href={saveNote.url} className="underline">
+                  {saveNote.url}
+                </Link>
+              </>
+            ) : null}
+          </p>
+        ) : null}
+        <div className="grid grid-cols-4 gap-0.5 rounded-xl bg-slate-100 p-0.5 dark:bg-slate-800">
           {KIND_FILTERS.map((item) => {
             const active = kind === item.key;
             return (
@@ -366,23 +342,20 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                 key={item.key}
                 type="button"
                 onClick={() => setKind(item.key)}
-                className={`min-h-7 min-w-0 flex-1 truncate rounded-lg px-1.5 text-[11px] font-medium sm:min-h-8 sm:flex-none sm:px-2.5 sm:text-xs ${
-                  active
-                    ? "bg-violet-600 text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                className={`min-h-8 truncate rounded-lg text-[11px] font-medium sm:text-xs ${
+                  active ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white" : "text-slate-500 dark:text-slate-400"
                 }`}
               >
-                {item.label}
+                {item.label === "Resimler" ? "Resim" : item.label === "Videolar" ? "Video" : item.label === "Sesler" ? "Ses" : item.label}
               </button>
             );
           })}
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-1">
           <select
             value={owner}
             onChange={(event) => setOwner(event.target.value)}
-            className="min-h-9 max-w-[12rem] rounded-lg border border-slate-200 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+            className="min-h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
             aria-label="Kullanıcı"
           >
             <option value="all">Tüm kullanıcılar</option>
@@ -395,24 +368,14 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           <select
             value={filter}
             onChange={(event) => setFilter(event.target.value as typeof filter)}
-            className="min-h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+            className="min-h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
           >
             <option value="all">Tümü</option>
             <option value="live">Yayında</option>
             <option value="hidden">Gizli</option>
           </select>
         </div>
-
         <TagChips tags={tags} active={tagFilter} onPick={setTagFilter} />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-1">
-            {SORTS.map((item) => (
-              <button key={item.key} type="button" onClick={() => setSort(item.key)} className={sortChipClass(sort === item.key)}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
         <GalleryBulkBar
           selectedCount={selected.length}
           allSelected={allFiltered}
@@ -431,35 +394,27 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           onTag={(tag) => void tagSelected(tag)}
           onTtl={(ttl) => void applySelectedTtl(ttl)}
         />
-
-        <div className={galleryGridClass}>
-          {visible.map((post) => (
-            <GalleryTile
-              key={post.id}
-              selected={selected.includes(post.id)}
-              dimmed={statusOf(post).hidden}
-              type={post.type}
-              src={post.src}
-              status={{
-                hidden: Boolean(post.hiddenAt),
-                password: Boolean(post.passwordHash),
-                deleted: Boolean(post.deletedAt),
-                expiresAt: post.expiresAt,
-              }}
-              tags={post.tags}
-              onToggle={() =>
-                setSelected((current) =>
-                  current.includes(post.id) ? current.filter((id) => id !== post.id) : [...current, post.id],
-                )
-              }
-              onOpen={() => setOpen(post)}
-            />
-          ))}
         </div>
-        <GalleryLoadMore
-          shown={visible.length}
-          total={filtered.length}
-          onMore={() => setShown((count) => Math.min(filtered.length, count + GALLERY_CHUNK))}
+
+        <GalleryListTable
+          rows={filtered.map((post) => ({
+            ...post,
+            owner:
+              post.holders.length > 0
+                ? post.holders.map((holder) => holder.name).join(", ")
+                : (post.ownerName ?? "Misafir"),
+          }))}
+          selected={selected}
+          allSelected={allFiltered}
+          showOwner
+          showViews
+          sort={sort}
+          onSort={setSort}
+          onToggle={(id) =>
+            setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
+          }
+          onToggleAll={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
+          onOpen={(id) => setOpen(filtered.find((post) => post.id === id) ?? null)}
         />
       </div>
       {open ? (

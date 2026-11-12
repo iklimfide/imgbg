@@ -4,16 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { GalleryBulkBar } from "@/components/GalleryBulkBar";
-import {
-  GALLERY_CHUNK,
-  GalleryLoadMore,
-  GalleryTile,
-  SORTS,
-  fileLabel,
-  galleryGridClass,
-  sortChipClass,
-  type GallerySort,
-} from "@/components/GalleryTile";
+import { GalleryListTable, compareGalleryItems, type GallerySort } from "@/components/GalleryTile";
 import { MediaEditPanel } from "@/components/MediaEditPanel";
 import { MediaPreview } from "@/components/MediaPreview";
 import { ModalCloseButton } from "@/components/ModalCloseButton";
@@ -38,47 +29,41 @@ export type ProfilePostCard = {
 };
 
 const FILTERS = [
-  { key: "all", label: "Tümü" },
-  { key: "image", label: "Resimlerim" },
-  { key: "video", label: "Videolarım" },
-  { key: "audio", label: "Seslerim" },
+  { key: "all", label: "Tümü", short: "Tümü" },
+  { key: "image", label: "Resimlerim", short: "Resim" },
+  { key: "video", label: "Videolarım", short: "Video" },
+  { key: "audio", label: "Seslerim", short: "Ses" },
 ] as const;
 
 type GalleryFilter = (typeof FILTERS)[number]["key"];
 
 function sortPosts(posts: ProfilePostCard[], sort: GallerySort) {
-  const list = [...posts];
-  if (sort === "old") {
-    return list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-  if (sort === "views") {
-    return list.sort((a, b) => b.views - a.views);
-  }
-  if (sort === "az") {
-    return list.sort((a, b) =>
-      fileLabel(a.originalName, a.id).localeCompare(fileLabel(b.originalName, b.id), "tr", { sensitivity: "base" }),
-    );
-  }
-  return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return [...posts].sort((a, b) => compareGalleryItems(a, b, sort));
 }
 
-export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[]; ownerName: string }) {
+export function ProfileUploads({
+  posts,
+  ownerName,
+  quota,
+}: {
+  posts: ProfilePostCard[];
+  ownerName: string;
+  quota?: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState<ProfilePostCard | null>(null);
   const [filter, setFilter] = useState<GalleryFilter>("all");
-  const [sort, setSort] = useState<GallerySort>("new");
+  const [sort, setSort] = useState<GallerySort>({ key: "date", dir: "desc" });
   const [selected, setSelected] = useState<string[]>([]);
   const [askDelete, setAskDelete] = useState(false);
   const [askDeleteOpen, setAskDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tagError, setTagError] = useState("");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [shown, setShown] = useState(GALLERY_CHUNK);
 
   const byType = filter === "all" ? posts : posts.filter((post) => post.type === filter);
   const tagged = tagFilter ? byType.filter((post) => postHasTag(post.tags, tagFilter)) : byType;
   const filtered = useMemo(() => sortPosts(tagged, sort), [tagged, sort]);
-  const visible = filtered.slice(0, shown);
   const tags = uniqueTags(posts);
   const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
   const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
@@ -86,7 +71,6 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
     filter === "video" ? `${ownerName}'in Videoları` : filter === "audio" ? `${ownerName}'in Sesleri` : `${ownerName}'in Resimleri`;
 
   useEffect(() => {
-    setShown(GALLERY_CHUNK);
     setSelected([]);
   }, [filter, sort, tagFilter]);
 
@@ -228,14 +212,27 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
   }
 
   if (posts.length === 0) {
-    return <p className="text-slate-500 dark:text-slate-400">Henüz yükleme yok.</p>;
+    return (
+      <div className="space-y-2">
+        {quota ? <p className="text-sm text-slate-500 dark:text-slate-400">Kalıcı alan: {quota}</p> : null}
+        <p className="text-slate-500 dark:text-slate-400">Henüz yükleme yok.</p>
+      </div>
+    );
   }
 
   return (
     <>
-      <div className="gallery-shell space-y-3">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-white sm:text-xl">{heading}</h2>
-        <div className="flex flex-nowrap gap-1">
+      <div className="space-y-3">
+        <div className="gallery-toolbar space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-white sm:text-lg">{heading}</h2>
+          {quota ? (
+            <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+              {quota} MB
+            </span>
+          ) : null}
+        </div>
+        <div className="grid grid-cols-4 gap-0.5 rounded-xl bg-slate-100 p-0.5 dark:bg-slate-800">
           {FILTERS.map((item) => {
             const active = filter === item.key;
             return (
@@ -243,27 +240,17 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
                 key={item.key}
                 type="button"
                 onClick={() => setFilter(item.key)}
-                className={`min-h-7 min-w-0 flex-1 truncate rounded-lg px-1.5 text-[11px] font-medium sm:min-h-8 sm:flex-none sm:px-2.5 sm:text-xs ${
-                  active
-                    ? "bg-violet-600 text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                className={`min-h-8 truncate rounded-lg text-[11px] font-medium sm:text-xs ${
+                  active ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white" : "text-slate-500 dark:text-slate-400"
                 }`}
               >
-                {item.label}
+                <span className="sm:hidden">{item.short}</span>
+                <span className="hidden sm:inline">{item.label}</span>
               </button>
             );
           })}
         </div>
         <TagChips tags={tags} active={tagFilter} onPick={setTagFilter} />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-1">
-            {SORTS.map((item) => (
-              <button key={item.key} type="button" onClick={() => setSort(item.key)} className={sortChipClass(sort === item.key)}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
         <GalleryBulkBar
           selectedCount={selected.length}
           allSelected={allFiltered}
@@ -276,39 +263,25 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
           onTag={(tag) => void tagSelected(tag)}
           onTtl={(ttl) => void applySelectedTtl(ttl)}
         />
+        </div>
 
         {filtered.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Bu türde yükleme yok.</p>
         ) : (
-          <div className={galleryGridClass}>
-            {visible.map((post) => (
-              <GalleryTile
-                key={post.id}
-                selected={selected.includes(post.id)}
-                dimmed={Boolean(post.hiddenAt)}
-                type={post.type}
-                src={post.src}
-                status={{
-                  hidden: Boolean(post.hiddenAt),
-                  password: Boolean(post.passwordHash),
-                  expiresAt: post.expiresAt,
-                }}
-                tags={post.tags}
-                onToggle={() =>
-                  setSelected((current) =>
-                    current.includes(post.id) ? current.filter((id) => id !== post.id) : [...current, post.id],
-                  )
-                }
-                onOpen={() => setOpen(post)}
-              />
-            ))}
-          </div>
+          <GalleryListTable
+            rows={filtered}
+            selected={selected}
+            allSelected={allFiltered}
+            showViews
+            sort={sort}
+            onSort={setSort}
+            onToggle={(id) =>
+              setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
+            }
+            onToggleAll={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
+            onOpen={(id) => setOpen(filtered.find((post) => post.id === id) ?? null)}
+          />
         )}
-        <GalleryLoadMore
-          shown={visible.length}
-          total={filtered.length}
-          onMore={() => setShown((count) => Math.min(filtered.length, count + GALLERY_CHUNK))}
-        />
       </div>
       <ConfirmModal
         open={askDelete}

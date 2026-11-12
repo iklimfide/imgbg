@@ -47,6 +47,28 @@ html.mobile-preview body {
   container-type: inline-size;
 }
 
+.gallery-toolbar {
+  position: sticky;
+  top: 3.5rem;
+  z-index: 15;
+  margin-inline: -1rem;
+  padding: 0.4rem 1rem 0.6rem;
+  background: color-mix(in srgb, #f3f5fb 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.dark .gallery-toolbar {
+  background: color-mix(in srgb, #020617 92%, transparent);
+}
+
+@media (min-width: 640px) {
+  .gallery-toolbar {
+    top: 4rem;
+    margin-inline: -1.5rem;
+    padding-inline: 1.5rem;
+  }
+}
+
 @media (min-width: 1024px) {
   html:not(.mobile-preview) .gallery-shell {
     width: 100vw;

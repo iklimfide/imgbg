@@ -16,17 +16,17 @@ export function TagChips({
     return null;
   }
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <button
         type="button"
         onClick={() => onPick(null)}
-        className={`inline-flex min-h-8 items-center rounded-full px-2.5 text-[11px] font-medium sm:text-xs ${
+        className={`inline-flex min-h-8 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium sm:text-xs ${
           !active
             ? "bg-sky-600 text-white"
             : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
         }`}
       >
-        Tüm etiketler
+        Tümü
       </button>
       {tags.map((tag) => {
         const on = active?.toLocaleLowerCase("tr") === tag.toLocaleLowerCase("tr");
@@ -35,7 +35,7 @@ export function TagChips({
             key={tag}
             type="button"
             onClick={() => onPick(on ? null : tag)}
-            className={`inline-flex min-h-8 items-center rounded-full px-2.5 text-[11px] font-medium sm:text-xs ${
+            className={`inline-flex min-h-8 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium sm:text-xs ${
               on
                 ? "bg-violet-600 text-white"
                 : "bg-violet-50 text-violet-800 hover:bg-violet-100 dark:bg-violet-950/50 dark:text-violet-200"

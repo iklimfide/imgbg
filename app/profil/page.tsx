@@ -53,11 +53,10 @@ export default async function GaleriPage() {
   }));
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-slate-500 dark:text-slate-400">
-        Kalıcı alan: {formatMb(used)} / {formatMb(MEMBER_STORAGE_MAX_BYTES)} MB
-      </p>
-      <ProfileUploads posts={cards} ownerName={session.user.name} />
-    </div>
+    <ProfileUploads
+      posts={cards}
+      ownerName={session.user.name}
+      quota={`${formatMb(used)} / ${formatMb(MEMBER_STORAGE_MAX_BYTES)}`}
+    />
   );
 }
