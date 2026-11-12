@@ -23,6 +23,10 @@ function d1Error(status: number, json: RawResponse) {
   return new Error(`D1_${status}${code}: ${detail}`);
 }
 
+export async function execD1(sql: string, params: unknown[] = []) {
+  return d1Raw(sql, params);
+}
+
 async function d1Raw(sql: string, params: unknown[]) {
   const account = env("CLOUDFLARE_ACCOUNT_ID");
   const databaseId = env("CLOUDFLARE_D1_DATABASE_ID");
@@ -91,6 +95,11 @@ export async function ensureD1Schema() {
   }
   for (const statement of ALBUM_SQL) {
     await d1Raw(statement, []);
+  }
+  try {
+    await d1Raw("ALTER TABLE posts ADD COLUMN tags TEXT", []);
+  } catch {
+    /* sütun zaten varsa D1 hata verir */
   }
 }
 

@@ -14,7 +14,7 @@ export async function getDb(): Promise<AppDb> {
     try {
       const { createD1Db, ensureD1Schema } = await import("./d1-http");
       cached = createD1Db();
-      void ensureD1Schema().catch(() => undefined);
+      await ensureD1Schema().catch(() => undefined);
       return cached;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "D1 bağlanamadı";
@@ -53,5 +53,10 @@ async function openLocalSqlite(): Promise<AppDb> {
   sqlite.pragma("foreign_keys = ON");
   const init = fs.readFileSync(path.join(process.cwd(), "drizzle", "0001_init.sql"), "utf8");
   sqlite.exec(init);
+  try {
+    sqlite.exec("ALTER TABLE posts ADD COLUMN tags TEXT");
+  } catch {
+    /* sütun zaten varsa SQLite hata verir */
+  }
   return drizzle(sqlite, { schema, logger: false }) as unknown as AppDb;
 }

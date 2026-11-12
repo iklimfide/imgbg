@@ -84,6 +84,7 @@ export const posts = sqliteTable(
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
     hiddenAt: integer("hidden_at", { mode: "timestamp_ms" }),
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+    tags: text("tags"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),

@@ -77,6 +77,7 @@ export async function POST(
     size: source.size,
     originalName: source.originalName,
     passwordHash: null,
+    tags: source.tags,
     expiresAt: resolveExpiry(true, ttl, source.type),
     createdAt: new Date(),
   });

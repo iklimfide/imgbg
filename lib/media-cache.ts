@@ -1,14 +1,22 @@
 const STORE = "imgbg-media-v1";
+const seen = new Set<string>();
 
-export async function rememberMedia(url: string) {
+export function mediaWasShown(url: string) {
+  return seen.has(url);
+}
+
+export function markMediaShown(url: string) {
+  seen.add(url);
+}
+
+export async function warmMedia(url: string) {
   if (!url || url.startsWith("blob:") || url.startsWith("data:")) {
-    return url;
+    return;
   }
   try {
     const cache = await caches.open(STORE);
-    const hit = await cache.match(url);
-    if (hit) {
-      return URL.createObjectURL(await hit.blob());
+    if (await cache.match(url)) {
+      return;
     }
     const local = url.startsWith("/") || url.startsWith(window.location.origin);
     const response = await fetch(url, {
@@ -16,12 +24,10 @@ export async function rememberMedia(url: string) {
       credentials: "omit",
       cache: "force-cache",
     });
-    if (!response.ok) {
-      return url;
+    if (response.ok) {
+      await cache.put(url, response.clone());
     }
-    await cache.put(url, response.clone());
-    return URL.createObjectURL(await response.blob());
   } catch {
-    return url;
+    /* tarayıcı HTTP önbelleği yeter */
   }
 }

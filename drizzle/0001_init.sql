@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS posts (
   expires_at INTEGER,
   hidden_at INTEGER,
   deleted_at INTEGER,
+  tags TEXT,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS posts_userId_idx ON posts(user_id);

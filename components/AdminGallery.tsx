@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ConfirmModal } from "@/components/ConfirmModal";
-import { CopyButton } from "@/components/CopyLink";
+import { GalleryBulkBar } from "@/components/GalleryBulkBar";
 import {
+  GALLERY_CHUNK,
+  GalleryLoadMore,
   GalleryTile,
   SORTS,
   fileLabel,
@@ -13,8 +15,11 @@ import {
   sortChipClass,
   type GallerySort,
 } from "@/components/GalleryTile";
-import { ModalCloseButton } from "@/components/ModalCloseButton";
+import { MediaEditPanel } from "@/components/MediaEditPanel";
 import { MediaPreview } from "@/components/MediaPreview";
+import { ModalCloseButton } from "@/components/ModalCloseButton";
+import { TagChips } from "@/components/TagEditor";
+import { cleanTags, postHasTag, uniqueTags } from "@/lib/tags";
 
 export type AdminPostCard = {
   id: string;
@@ -34,9 +39,8 @@ export type AdminPostCard = {
   createdAt: string;
   pageUrl: string;
   src: string;
+  tags: string[];
 };
-
-const CHUNK = 12;
 
 const KIND_FILTERS = [
   { key: "all", label: "Tümü" },
@@ -91,13 +95,12 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   const [kind, setKind] = useState<KindFilter>("all");
   const [owner, setOwner] = useState("all");
   const [sort, setSort] = useState<GallerySort>("new");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const [shown, setShown] = useState(CHUNK);
-  const sentinel = useRef<HTMLDivElement>(null);
-  const [ask, setAsk] = useState<{ message: string; run: () => Promise<void> } | null>(null);
+  const [shown, setShown] = useState(GALLERY_CHUNK);
   const [saveNote, setSaveNote] = useState<{ text: string; url?: string } | null>(null);
+  const [ask, setAsk] = useState<{ message: string; run: () => Promise<void> } | null>(null);
 
   const owners = useMemo(() => {
     const map = new Map<string, string>();
@@ -125,6 +128,9 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           return false;
         }
       }
+      if (tagFilter && !postHasTag(post.tags, tagFilter)) {
+        return false;
+      }
       const hidden = statusOf(post).hidden;
       if (filter === "live") {
         return !hidden;
@@ -135,38 +141,20 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       return true;
     });
     return sortPosts(next, sort);
-  }, [posts, filter, kind, owner, sort]);
+  }, [posts, filter, kind, owner, sort, tagFilter]);
 
   const visible = filtered.slice(0, shown);
   const allBytes = filtered.reduce((sum, post) => sum + post.size, 0);
+  const tags = uniqueTags(posts);
   const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
   const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
 
   useEffect(() => {
-    setShown(CHUNK);
+    setShown(GALLERY_CHUNK);
     setSelected([]);
-    setMenu(false);
-  }, [filter, kind, owner, sort]);
+  }, [filter, kind, owner, sort, tagFilter]);
 
   useEffect(() => {
-    const node = sentinel.current;
-    if (!node) {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setShown((count) => Math.min(filtered.length, count + CHUNK));
-        }
-      },
-      { rootMargin: "800px" },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [filtered.length, shown]);
-
-  useEffect(() => {
-    setSaveNote(null);
     if (!open) {
       return;
     }
@@ -186,7 +174,6 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   async function saveToGallery(kod: string) {
     setBusy(true);
     setSaveNote(null);
-    setMenu(false);
     try {
       const response = await fetch(`/api/posts/${kod}/save`, { method: "POST" });
       const json = (await response.json().catch(() => null)) as {
@@ -220,6 +207,111 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
     if (open?.id === kod && action === "purge") {
       setOpen(null);
     }
+    router.refresh();
+  }
+
+  async function patchOpen(body: Record<string, unknown>) {
+    if (!open) {
+      return;
+    }
+    setBusy(true);
+    setSaveNote(null);
+    const response = await fetch(`/api/posts/${open.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await response.json().catch(() => null)) as {
+      error?: string;
+      tags?: string[];
+      hidden?: boolean;
+      originalName?: string | null;
+      password?: boolean;
+      expiresAt?: string | null;
+    } | null;
+    setBusy(false);
+    if (!response.ok) {
+      setSaveNote({ text: json?.error ?? "Kaydedilemedi." });
+      return;
+    }
+    setOpen((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        tags: json?.tags ?? current.tags,
+        hiddenAt: typeof json?.hidden === "boolean" ? (json.hidden ? new Date().toISOString() : null) : current.hiddenAt,
+        originalName: json?.originalName !== undefined ? json.originalName : current.originalName,
+        passwordHash: typeof json?.password === "boolean" ? (json.password ? "set" : null) : current.passwordHash,
+        expiresAt: json?.expiresAt !== undefined ? json.expiresAt : current.expiresAt,
+      };
+    });
+    router.refresh();
+  }
+
+  async function setHidden(ids: string[], hidden: boolean) {
+    if (ids.length === 0) {
+      return;
+    }
+    setBusy(true);
+    const byId = new Map(posts.map((post) => [post.id, post]));
+    await Promise.all(
+      ids.map((kod) => {
+        const post = byId.get(kod);
+        if (!hidden && post?.deletedAt) {
+          return fetch(`/api/admin/posts/${kod}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "restore" }),
+          });
+        }
+        return fetch(`/api/posts/${kod}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hidden }),
+        });
+      }),
+    );
+    setBusy(false);
+    router.refresh();
+  }
+
+  async function tagSelected(tag: string) {
+    if (selected.length === 0 || tag.trim().length < 2) {
+      return;
+    }
+    setBusy(true);
+    const byId = new Map(posts.map((post) => [post.id, post]));
+    await Promise.all(
+      selected.map((kod) => {
+        const post = byId.get(kod);
+        return fetch(`/api/posts/${kod}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: cleanTags([...(post?.tags ?? []), tag]) }),
+        });
+      }),
+    );
+    setBusy(false);
+    router.refresh();
+  }
+
+  async function applySelectedTtl(ttl: string) {
+    if (selected.length === 0) {
+      return;
+    }
+    setBusy(true);
+    await Promise.all(
+      selected.map((kod) =>
+        fetch(`/api/posts/${kod}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ttl }),
+        }),
+      ),
+    );
+    setBusy(false);
     router.refresh();
   }
 
@@ -311,6 +403,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           </select>
         </div>
 
+        <TagChips tags={tags} active={tagFilter} onPick={setTagFilter} />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-1">
             {SORTS.map((item) => (
@@ -319,40 +412,25 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
               </button>
             ))}
           </div>
-          <div className="relative flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
-              className="text-sm font-medium text-sky-700 hover:underline dark:text-sky-300"
-            >
-              Hepsini seç
-            </button>
-            <button type="button" onClick={() => setMenu((value) => !value)} className="text-sm font-medium text-slate-600 hover:underline dark:text-slate-300">
-              Eylemler ▾
-            </button>
-            {menu ? (
-              <div className="absolute right-0 top-8 z-30 min-w-[12rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                <button
-                  type="button"
-                  disabled={busy || selected.length === 0}
-                  onClick={() => {
-                    setMenu(false);
-                    setAsk({
-                      message: `${selected.length} kaydı kalıcı silmek istiyor musun?`,
-                      run: purgeSelected,
-                    });
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-40"
-                >
-                  Kalıcı sil ({selected.length})
-                </button>
-                <div className="px-2 py-1">
-                  <CopyButton text={selectedUrls.join("\n")} compact disabled={selectedUrls.length === 0} label={`Kopyala (${selectedUrls.length})`} />
-                </div>
-              </div>
-            ) : null}
-          </div>
         </div>
+        <GalleryBulkBar
+          selectedCount={selected.length}
+          allSelected={allFiltered}
+          busy={busy}
+          deleteLabel="Kalıcı sil"
+          copyText={selectedUrls.join("\n")}
+          onSelectAll={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
+          onHide={() => void setHidden(selected, true)}
+          onPublish={() => void setHidden(selected, false)}
+          onDelete={() =>
+            setAsk({
+              message: `${selected.length} kaydı kalıcı silmek istiyor musun?`,
+              run: purgeSelected,
+            })
+          }
+          onTag={(tag) => void tagSelected(tag)}
+          onTtl={(ttl) => void applySelectedTtl(ttl)}
+        />
 
         <div className={galleryGridClass}>
           {visible.map((post) => (
@@ -362,13 +440,28 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
               dimmed={statusOf(post).hidden}
               type={post.type}
               src={post.src}
+              status={{
+                hidden: Boolean(post.hiddenAt),
+                password: Boolean(post.passwordHash),
+                deleted: Boolean(post.deletedAt),
+                expiresAt: post.expiresAt,
+              }}
+              tags={post.tags}
+              onToggle={() =>
+                setSelected((current) =>
+                  current.includes(post.id) ? current.filter((id) => id !== post.id) : [...current, post.id],
+                )
+              }
               onOpen={() => setOpen(post)}
             />
           ))}
         </div>
-        <div ref={sentinel} className="h-8" />
+        <GalleryLoadMore
+          shown={visible.length}
+          total={filtered.length}
+          onMore={() => setShown((count) => Math.min(filtered.length, count + GALLERY_CHUNK))}
+        />
       </div>
-
       {open ? (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
@@ -382,16 +475,27 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           >
             <ModalCloseButton onClick={() => setOpen(null)} />
             <div className="max-h-[92vh] overflow-y-auto p-4 pr-16 sm:p-6 sm:pr-20">
-              <div className="mb-3 flex min-w-0 items-center gap-2">
-                <p className="min-w-0 truncate text-sm text-sky-600 sm:text-base">{open.pageUrl}</p>
-                <CopyButton text={open.pageUrl} compact />
-              </div>
               <p className="mb-3 text-sm text-slate-500">
                 {open.holders.length > 0 ? open.holders.map((holder) => holder.name).join(", ") : (open.ownerName ?? "Misafir")}
               </p>
               <MediaPreview type={open.type} src={open.src} />
+              <MediaEditPanel
+                post={{ ...open, hiddenAt: open.hiddenAt ?? null }}
+                pending={busy}
+                tagError={saveNote && !saveNote.url ? saveNote.text : ""}
+                onPatch={(body) => patchOpen(body)}
+                onDelete={() =>
+                  setAsk({
+                    message: "Bu kaydı kalıcı silmek istiyor musun?",
+                    run: async () => {
+                      await run(open.id, "purge");
+                      setAsk(null);
+                    },
+                  })
+                }
+              />
               {open.type === "image" || open.type === "video" ? (
-                <div className="mt-4 space-y-2">
+                <div className="mt-3 space-y-2">
                   <button
                     type="button"
                     disabled={busy}
@@ -400,19 +504,6 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                   >
                     {busy ? "Ekleniyor..." : "Galerime ekle"}
                   </button>
-                  {saveNote ? (
-                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                      {saveNote.text}
-                      {saveNote.url ? (
-                        <>
-                          {" · "}
-                          <Link href={saveNote.url} className="text-sky-600 underline">
-                            {saveNote.url}
-                          </Link>
-                        </>
-                      ) : null}
-                    </p>
-                  ) : null}
                 </div>
               ) : null}
               <div className="mt-3 flex gap-2">

@@ -7,6 +7,7 @@ import { isAdminEmail } from "@/lib/admin";
 import { getSession } from "@/lib/session";
 import { publicMediaUrl } from "@/lib/r2";
 import { getSiteUrl, shareUrl } from "@/lib/site";
+import { parseTags } from "@/lib/tags";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,7 @@ export default async function AdminPage() {
       createdAt: iso(post.createdAt) ?? new Date().toISOString(),
       pageUrl: shareUrl(post.id, origin),
       src: publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash)),
+      tags: parseTags(post.tags),
     });
   }
 

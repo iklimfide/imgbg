@@ -3,6 +3,7 @@ import { and, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { posts, type Post } from "@/db/schema";
 import { deleteFromR2, isR2Configured } from "@/lib/r2";
+import { serializeTags } from "@/lib/tags";
 
 export function guestKeyFromRequest(request: Request) {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -71,6 +72,22 @@ export async function softDeletePost(kod: string) {
     .update(posts)
     .set({ deletedAt: new Date() })
     .where(and(eq(posts.id, kod), isNull(posts.deletedAt)));
+}
+
+export async function setPostTags(kod: string, tags: string[]) {
+  const value = serializeTags(tags);
+  if (process.env.CLOUDFLARE_D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN) {
+    const { execD1 } = await import("@/db/d1-http");
+    try {
+      await execD1("ALTER TABLE posts ADD COLUMN tags TEXT");
+    } catch {
+      /* sütun varsa D1 hata döner */
+    }
+    await execD1("UPDATE posts SET tags = ? WHERE id = ?", [value, kod]);
+    return;
+  }
+  const db = await getDb();
+  await db.update(posts).set({ tags: value }).where(eq(posts.id, kod));
 }
 
 export async function setPostHidden(kod: string, hidden: boolean) {

@@ -7,11 +7,13 @@ export function CopyButton({
   compact = false,
   disabled = false,
   label = "Kopyala",
+  className,
 }: {
   text: string;
   compact?: boolean;
   disabled?: boolean;
   label?: string;
+  className?: string;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -20,9 +22,10 @@ export function CopyButton({
       type="button"
       disabled={disabled || !text}
       className={
-        compact
+        className ??
+        (compact
           ? "inline-flex min-h-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 px-2.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-          : "inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-xl bg-violet-600 px-4 text-sm text-white hover:bg-violet-500 disabled:opacity-50 @min-[28rem]:w-auto"
+          : "inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-xl bg-violet-600 px-4 text-sm text-white hover:bg-violet-500 disabled:opacity-50 @min-[28rem]:w-auto")
       }
       onClick={async () => {
         await navigator.clipboard.writeText(text);

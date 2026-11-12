@@ -1,10 +1,39 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { rememberMedia } from "@/lib/media-cache";
+import { MediaStatusBadges, type MediaStatusInfo } from "@/components/MediaStatusBadges";
+import { markMediaShown, mediaWasShown, warmMedia } from "@/lib/media-cache";
+
+export const GALLERY_CHUNK = 18;
 
 export const galleryGridClass =
-  "grid grid-cols-2 gap-1 @min-[32rem]:grid-cols-4 @min-[48rem]:grid-cols-6 @min-[64rem]:grid-cols-8 @min-[80rem]:grid-cols-10 @min-[96rem]:grid-cols-12";
+  "grid grid-cols-2 gap-1 @min-[32rem]:grid-cols-2 @min-[48rem]:grid-cols-3 @min-[64rem]:grid-cols-4 @min-[80rem]:grid-cols-5 @min-[96rem]:grid-cols-6";
+
+export function GalleryLoadMore({
+  shown,
+  total,
+  onMore,
+}: {
+  shown: number;
+  total: number;
+  onMore: () => void;
+}) {
+  if (shown >= total) {
+    return null;
+  }
+  const next = Math.min(GALLERY_CHUNK, total - shown);
+  return (
+    <div className="flex justify-center pt-2">
+      <button
+        type="button"
+        onClick={onMore}
+        className="inline-flex min-h-11 items-center rounded-full bg-sky-600 px-5 text-sm font-medium text-white hover:bg-sky-500"
+      >
+        Daha fazla yükle ({next})
+      </button>
+    </div>
+  );
+}
 
 export function fileLabel(name: string | null, id: string) {
   const raw = name?.trim();
@@ -26,10 +55,13 @@ export function GalleryThumb({
   src: string;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const [live, setLive] = useState(false);
-  const [cached, setCached] = useState<string | null>(null);
+  const [live, setLive] = useState(() => mediaWasShown(src));
 
   useEffect(() => {
+    if (live) {
+      markMediaShown(src);
+      return;
+    }
     const node = root.current;
     if (!node) {
       return;
@@ -37,6 +69,7 @@ export function GalleryThumb({
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
+          markMediaShown(src);
           setLive(true);
           observer.disconnect();
         }
@@ -45,33 +78,7 @@ export function GalleryThumb({
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!live || type !== "image") {
-      return;
-    }
-    let drop: string | null = null;
-    let cancelled = false;
-    void rememberMedia(src).then((next) => {
-      if (cancelled) {
-        if (next.startsWith("blob:")) {
-          URL.revokeObjectURL(next);
-        }
-        return;
-      }
-      setCached(next);
-      if (next.startsWith("blob:")) {
-        drop = next;
-      }
-    });
-    return () => {
-      cancelled = true;
-      if (drop) {
-        URL.revokeObjectURL(drop);
-      }
-    };
-  }, [live, src, type]);
+  }, [live, src]);
 
   if (type === "audio") {
     return (
@@ -86,9 +93,17 @@ export function GalleryThumb({
       {live && type === "video" ? (
         <video src={src} muted playsInline preload="metadata" className="h-full w-full object-cover" />
       ) : null}
-      {live && type === "image" && cached ? (
+      {live && type === "image" ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={cached} alt="" decoding="async" className="h-full w-full object-cover" />
+        <img
+          src={src}
+          alt=""
+          decoding="async"
+          className="h-full w-full object-cover"
+          onLoad={() => {
+            void warmMedia(src);
+          }}
+        />
       ) : null}
     </div>
   );
@@ -99,25 +114,63 @@ export function GalleryTile({
   dimmed,
   type,
   src,
+  status,
+  tags,
+  onToggle,
   onOpen,
 }: {
   selected: boolean;
   dimmed?: boolean;
   type: "image" | "video" | "audio";
   src: string;
+  status?: MediaStatusInfo;
+  tags?: string[];
+  onToggle?: () => void;
   onOpen: () => void;
 }) {
+  const shownTags = tags?.slice(0, 3) ?? [];
+  const extra = (tags?.length ?? 0) - shownTags.length;
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      style={{ contentVisibility: "auto", containIntrinsicSize: "128px" }}
-      className={`aspect-square w-full overflow-hidden bg-slate-200 dark:bg-slate-800 ${
+    <div
+      className={`relative aspect-square w-full overflow-hidden bg-slate-200 dark:bg-slate-800 ${
         dimmed ? "opacity-50" : ""
       } ${selected ? "ring-2 ring-inset ring-sky-500" : ""}`}
     >
-      <GalleryThumb type={type} src={src} />
-    </button>
+      <button type="button" onClick={onOpen} className="absolute inset-0">
+        <GalleryThumb type={type} src={src} />
+      </button>
+      {onToggle ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label="Seç"
+          onClick={onToggle}
+          className={`absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold text-white ${
+            selected ? "border-sky-500 bg-sky-500" : "border-white bg-black/35"
+          }`}
+        >
+          {selected ? "✓" : ""}
+        </button>
+      ) : null}
+      {status ? <MediaStatusBadges {...status} compact /> : null}
+      {shownTags.length > 0 ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] flex flex-wrap gap-1 p-1.5">
+          {shownTags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full bg-violet-600/90 px-1.5 py-0.5 text-[10px] font-medium leading-4 text-white shadow-sm"
+            >
+              #{tag}
+            </span>
+          ))}
+          {extra > 0 ? (
+            <span className="rounded-full bg-slate-900/70 px-1.5 py-0.5 text-[10px] font-medium leading-4 text-white">
+              +{extra}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

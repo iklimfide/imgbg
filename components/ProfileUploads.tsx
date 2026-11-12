@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmModal } from "@/components/ConfirmModal";
-import { CopyButton } from "@/components/CopyLink";
+import { GalleryBulkBar } from "@/components/GalleryBulkBar";
 import {
+  GALLERY_CHUNK,
+  GalleryLoadMore,
   GalleryTile,
   SORTS,
   fileLabel,
@@ -12,8 +14,11 @@ import {
   sortChipClass,
   type GallerySort,
 } from "@/components/GalleryTile";
-import { ModalCloseButton } from "@/components/ModalCloseButton";
+import { MediaEditPanel } from "@/components/MediaEditPanel";
 import { MediaPreview } from "@/components/MediaPreview";
+import { ModalCloseButton } from "@/components/ModalCloseButton";
+import { TagChips } from "@/components/TagEditor";
+import { cleanTags, postHasTag, uniqueTags } from "@/lib/tags";
 
 export type ProfilePostCard = {
   id: string;
@@ -24,13 +29,13 @@ export type ProfilePostCard = {
   originalName: string | null;
   passwordHash: string | null;
   hiddenAt: string | null;
+  expiresAt: string | null;
   views: number;
   createdAt: string;
   pageUrl: string;
   src: string;
+  tags: string[];
 };
-
-const CHUNK = 12;
 
 const FILTERS = [
   { key: "all", label: "Tümü" },
@@ -64,39 +69,26 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
   const [sort, setSort] = useState<GallerySort>("new");
   const [selected, setSelected] = useState<string[]>([]);
   const [askDelete, setAskDelete] = useState(false);
+  const [askDeleteOpen, setAskDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const [shown, setShown] = useState(CHUNK);
-  const sentinel = useRef<HTMLDivElement>(null);
+  const [tagError, setTagError] = useState("");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [shown, setShown] = useState(GALLERY_CHUNK);
+
   const byType = filter === "all" ? posts : posts.filter((post) => post.type === filter);
-  const filtered = useMemo(() => sortPosts(byType, sort), [byType, sort]);
+  const tagged = tagFilter ? byType.filter((post) => postHasTag(post.tags, tagFilter)) : byType;
+  const filtered = useMemo(() => sortPosts(tagged, sort), [tagged, sort]);
   const visible = filtered.slice(0, shown);
+  const tags = uniqueTags(posts);
   const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
   const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
   const heading =
     filter === "video" ? `${ownerName}'in Videoları` : filter === "audio" ? `${ownerName}'in Sesleri` : `${ownerName}'in Resimleri`;
 
   useEffect(() => {
-    setShown(CHUNK);
+    setShown(GALLERY_CHUNK);
     setSelected([]);
-  }, [filter, sort]);
-
-  useEffect(() => {
-    const node = sentinel.current;
-    if (!node) {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setShown((count) => Math.min(filtered.length, count + CHUNK));
-        }
-      },
-      { rootMargin: "800px" },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [filtered.length, shown]);
+  }, [filter, sort, tagFilter]);
 
   useEffect(() => {
     if (!open) {
@@ -120,7 +112,6 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
       return;
     }
     setBusy(true);
-    setMenu(false);
     await Promise.all(
       ids.map((kod) =>
         fetch(`/api/posts/${kod}`, {
@@ -131,7 +122,96 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
       ),
     );
     setBusy(false);
-    setSelected([]);
+    router.refresh();
+  }
+
+  async function tagSelected(tag: string) {
+    if (selected.length === 0 || tag.trim().length < 2) {
+      return;
+    }
+    setBusy(true);
+    const byId = new Map(posts.map((post) => [post.id, post]));
+    await Promise.all(
+      selected.map((kod) => {
+        const post = byId.get(kod);
+        return fetch(`/api/posts/${kod}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: cleanTags([...(post?.tags ?? []), tag]) }),
+        });
+      }),
+    );
+    setBusy(false);
+    router.refresh();
+  }
+
+  async function applySelectedTtl(ttl: string) {
+    if (selected.length === 0) {
+      return;
+    }
+    setBusy(true);
+    await Promise.all(
+      selected.map((kod) =>
+        fetch(`/api/posts/${kod}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ttl }),
+        }),
+      ),
+    );
+    setBusy(false);
+    router.refresh();
+  }
+
+  async function patchOpen(body: Record<string, unknown>) {
+    if (!open) {
+      return;
+    }
+    setBusy(true);
+    setTagError("");
+    const response = await fetch(`/api/posts/${open.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await response.json().catch(() => null)) as {
+      error?: string;
+      tags?: string[];
+      hidden?: boolean;
+      originalName?: string | null;
+      password?: boolean;
+      expiresAt?: string | null;
+    } | null;
+    setBusy(false);
+    if (!response.ok) {
+      setTagError(json?.error ?? "Kaydedilemedi.");
+      return;
+    }
+    setOpen((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        tags: json?.tags ?? current.tags,
+        hiddenAt: typeof json?.hidden === "boolean" ? (json.hidden ? new Date().toISOString() : null) : current.hiddenAt,
+        originalName: json?.originalName !== undefined ? json.originalName : current.originalName,
+        passwordHash: typeof json?.password === "boolean" ? (json.password ? "set" : null) : current.passwordHash,
+        expiresAt: json?.expiresAt !== undefined ? json.expiresAt : current.expiresAt,
+      };
+    });
+    router.refresh();
+  }
+
+  async function deleteOpen() {
+    if (!open) {
+      return;
+    }
+    setBusy(true);
+    await fetch(`/api/posts/${open.id}`, { method: "DELETE" });
+    setBusy(false);
+    setAskDeleteOpen(false);
+    setOpen(null);
     router.refresh();
   }
 
@@ -174,6 +254,7 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
             );
           })}
         </div>
+        <TagChips tags={tags} active={tagFilter} onPick={setTagFilter} />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-1">
             {SORTS.map((item) => (
@@ -182,59 +263,19 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
               </button>
             ))}
           </div>
-          <div className="relative flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setSelected(allFiltered ? [] : filtered.map((post) => post.id))
-              }
-              className="text-sm font-medium text-sky-700 hover:underline dark:text-sky-300"
-            >
-              Hepsini seç
-            </button>
-            <button
-              type="button"
-              onClick={() => setMenu((value) => !value)}
-              className="text-sm font-medium text-slate-600 hover:underline dark:text-slate-300"
-            >
-              Eylemler ▾
-            </button>
-            {menu ? (
-              <div className="absolute right-0 top-8 z-30 min-w-[11rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                <button
-                  type="button"
-                  disabled={busy || selected.length === 0}
-                  onClick={() => {
-                    setMenu(false);
-                    setAskDelete(true);
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-40"
-                >
-                  Sil ({selected.length})
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || selected.length === 0}
-                  onClick={() => void setHidden(selected, true)}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-40 dark:hover:bg-slate-800"
-                >
-                  Gizle
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || selected.length === 0}
-                  onClick={() => void setHidden(selected, false)}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-40 dark:hover:bg-slate-800"
-                >
-                  Yayına al
-                </button>
-                <div className="px-2 py-1">
-                  <CopyButton text={selectedUrls.join("\n")} compact disabled={selectedUrls.length === 0} label={`Kopyala (${selectedUrls.length})`} />
-                </div>
-              </div>
-            ) : null}
-          </div>
         </div>
+        <GalleryBulkBar
+          selectedCount={selected.length}
+          allSelected={allFiltered}
+          busy={busy}
+          copyText={selectedUrls.join("\n")}
+          onSelectAll={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
+          onHide={() => void setHidden(selected, true)}
+          onPublish={() => void setHidden(selected, false)}
+          onDelete={() => setAskDelete(true)}
+          onTag={(tag) => void tagSelected(tag)}
+          onTtl={(ttl) => void applySelectedTtl(ttl)}
+        />
 
         {filtered.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Bu türde yükleme yok.</p>
@@ -247,20 +288,41 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
                 dimmed={Boolean(post.hiddenAt)}
                 type={post.type}
                 src={post.src}
+                status={{
+                  hidden: Boolean(post.hiddenAt),
+                  password: Boolean(post.passwordHash),
+                  expiresAt: post.expiresAt,
+                }}
+                tags={post.tags}
+                onToggle={() =>
+                  setSelected((current) =>
+                    current.includes(post.id) ? current.filter((id) => id !== post.id) : [...current, post.id],
+                  )
+                }
                 onOpen={() => setOpen(post)}
               />
             ))}
           </div>
         )}
-        <div ref={sentinel} className="h-8" />
+        <GalleryLoadMore
+          shown={visible.length}
+          total={filtered.length}
+          onMore={() => setShown((count) => Math.min(filtered.length, count + GALLERY_CHUNK))}
+        />
       </div>
-
       <ConfirmModal
         open={askDelete}
         message={`${selected.length} paylaşımı silmek istiyor musun?`}
         pending={busy}
         onCancel={() => setAskDelete(false)}
         onConfirm={() => void removeSelected()}
+      />
+      <ConfirmModal
+        open={askDeleteOpen}
+        message="Bu paylaşımı silmek istiyor musun?"
+        pending={busy}
+        onCancel={() => setAskDeleteOpen(false)}
+        onConfirm={() => void deleteOpen()}
       />
       {open ? (
         <div
@@ -275,11 +337,14 @@ export function ProfileUploads({ posts, ownerName }: { posts: ProfilePostCard[];
           >
             <ModalCloseButton onClick={() => setOpen(null)} />
             <div className="max-h-[92vh] overflow-y-auto p-4 pr-16 sm:p-6 sm:pr-20">
-              <div className="mb-3 flex min-w-0 items-center gap-2">
-                <p className="min-w-0 truncate text-sm text-sky-600 sm:text-base">{open.pageUrl}</p>
-                <CopyButton text={open.pageUrl} compact />
-              </div>
               <MediaPreview type={open.type} src={open.src} />
+              <MediaEditPanel
+                post={open}
+                pending={busy}
+                tagError={tagError}
+                onPatch={(body) => patchOpen(body)}
+                onDelete={() => setAskDeleteOpen(true)}
+              />
             </div>
           </div>
         </div>
