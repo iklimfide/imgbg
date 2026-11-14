@@ -91,7 +91,7 @@ async function socialResponse(params: {
         { status: 400 },
       );
     }
-    const file = await downloadPublicMedia(pick.url, params.maxBytes, media.referer);
+    const file = await downloadPublicMedia(pick, params.maxBytes, media.referer);
     return fileResponse(file, "video", params.userId, params.guestKey);
   }
   const photo = media.photos[0];
