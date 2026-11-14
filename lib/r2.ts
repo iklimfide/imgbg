@@ -173,6 +173,33 @@ export async function deleteFromR2(key: string) {
   );
 }
 
+export async function bufferFromR2(key: string) {
+  const object = await client().send(
+    new GetObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+    }),
+  );
+  const bytes = object.Body ? await object.Body.transformToByteArray() : null;
+  return bytes && bytes.byteLength > 0 ? Buffer.from(bytes) : null;
+}
+
+export function thumbR2Key(r2Key: string) {
+  const base = r2Key.replace(/\.thumb\.webp$/i, "").replace(/\.[^/.]+$/, "");
+  return `${base}.thumb.webp`;
+}
+
+export function publicThumbUrl(kod: string, r2Key: string, protectedShare = false) {
+  if (protectedShare) {
+    return `/api/thumb/${kod}`;
+  }
+  const base = process.env.R2_PUBLIC_URL?.replace(/\/$/, "");
+  if (base) {
+    return `${base}/${thumbR2Key(r2Key)}`;
+  }
+  return `/api/thumb/${kod}`;
+}
+
 export async function getFromR2(key: string) {
   const object = await client().send(
     new GetObjectCommand({

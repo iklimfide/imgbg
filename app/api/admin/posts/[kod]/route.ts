@@ -1,5 +1,12 @@
 import { requireAdmin } from "@/lib/admin";
-import { getPost, purgePost, restorePost, softDeletePost } from "@/lib/posts";
+import {
+  getPost,
+  purgePost,
+  removeFromGalleries,
+  restoreFromGalleries,
+  restorePost,
+  softDeletePost,
+} from "@/lib/posts";
 
 export async function POST(
   request: Request,
@@ -9,13 +16,19 @@ export async function POST(
     return Response.json({ error: "Yetkisiz." }, { status: 403 });
   }
   const { kod } = await params;
-  const body = (await request.json().catch(() => null)) as { action?: string } | null;
+  const body = (await request.json().catch(() => null)) as { action?: string; ownerId?: string } | null;
   const post = await getPost(kod);
   if (!post) {
     return Response.json({ error: "Kayıt bulunamadı." }, { status: 404 });
   }
+  const ownerId = typeof body?.ownerId === "string" ? body.ownerId : undefined;
   if (body?.action === "restore") {
+    await restoreFromGalleries(kod, ownerId);
     await restorePost(kod);
+    return Response.json({ ok: true });
+  }
+  if (body?.action === "remove") {
+    await removeFromGalleries(kod, ownerId);
     return Response.json({ ok: true });
   }
   if (body?.action === "hide") {

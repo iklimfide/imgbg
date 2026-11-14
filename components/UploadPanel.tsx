@@ -12,6 +12,7 @@ import { parseHttpUrls } from "@/lib/http-urls";
 import { fileLimit, formatMb, ttlOptionsFor } from "@/lib/quota";
 import { normalizeHttpUrl, readSeenLinks, rememberSeenLinks } from "@/lib/seen-links";
 import { MEDIA_CACHE_CONTROL, type MediaKind } from "@/lib/site";
+import { posterFromVideoFile } from "@/lib/video-poster";
 
 const ACCEPT: Record<MediaKind, string> = {
   image: "image/jpeg,image/png,image/webp,image/gif",
@@ -77,6 +78,7 @@ type UploadJson = {
   deleteToken?: string;
   existing?: boolean;
   putUrl?: string;
+  thumbPutUrl?: string;
   mime?: string;
 };
 
@@ -631,6 +633,18 @@ export function UploadPanel({
         }
 
         const mime = prepared.mime || item.file.type || "application/octet-stream";
+        if (kind === "video" && prepared.thumbPutUrl) {
+          const poster = await posterFromVideoFile(item.file).catch(() => null);
+          if (poster) {
+            await putWithXhr(
+              prepared.thumbPutUrl,
+              new File([poster], "thumb.webp", { type: "image/webp" }),
+              "image/webp",
+              () => undefined,
+              () => undefined,
+            ).catch(() => undefined);
+          }
+        }
         await putWithXhr(
           prepared.putUrl,
           item.file,

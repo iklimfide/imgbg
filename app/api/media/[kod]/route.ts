@@ -5,7 +5,7 @@ import { getSession } from "@/lib/session";
 import { hasUnlocked } from "@/lib/unlock";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ kod: string }> },
 ) {
   if (!isR2Configured()) {
@@ -13,6 +13,7 @@ export async function GET(
   }
 
   const { kod } = await params;
+  const capture = new URL(request.url).searchParams.get("capture") === "1";
   const [post, session] = await Promise.all([getPost(kod), getSession()]);
   const admin = isAdminEmail(session?.user?.email);
 
@@ -32,7 +33,7 @@ export async function GET(
     }
   }
 
-  if (!post.passwordHash && isPubliclyVisible(post)) {
+  if (!capture && !post.passwordHash && isPubliclyVisible(post)) {
     const url = await signedGetUrl(post.r2Key);
     return Response.redirect(url, 302);
   }

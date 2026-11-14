@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ConfirmModal } from "@/components/ConfirmModal";
@@ -10,7 +10,8 @@ import { MediaEditPanel } from "@/components/MediaEditPanel";
 import { MediaPreview } from "@/components/MediaPreview";
 import { ModalCloseButton } from "@/components/ModalCloseButton";
 import { TagChips } from "@/components/TagEditor";
-import { cleanTags, postHasTag, uniqueTags } from "@/lib/tags";
+import { prefetchMedia } from "@/lib/media-cache";
+import { cleanTags, matchesTagFilter, toggleTagFilter, uniqueTags, withoutTags } from "@/lib/tags";
 
 export type AdminPostCard = {
   id: string;
@@ -30,29 +31,50 @@ export type AdminPostCard = {
   createdAt: string;
   pageUrl: string;
   src: string;
+  thumbSrc: string;
   tags: string[];
 };
 
 const KIND_FILTERS = [
-  { key: "all", label: "Tümü" },
-  { key: "image", label: "Resimler" },
-  { key: "video", label: "Videolar" },
-  { key: "audio", label: "Sesler" },
+  {
+    key: "all",
+    label: "Tümü",
+    on: "bg-sky-600 text-white shadow-sm",
+    off: "bg-sky-100 text-sky-800 hover:bg-sky-200 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/60",
+  },
+  {
+    key: "image",
+    label: "Resimler",
+    on: "bg-violet-600 text-white shadow-sm",
+    off: "bg-violet-100 text-violet-800 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:hover:bg-violet-900/60",
+  },
+  {
+    key: "video",
+    label: "Videolar",
+    on: "bg-fuchsia-600 text-white shadow-sm",
+    off: "bg-fuchsia-100 text-fuchsia-800 hover:bg-fuchsia-200 dark:bg-fuchsia-950/50 dark:text-fuchsia-200 dark:hover:bg-fuchsia-900/60",
+  },
+  {
+    key: "audio",
+    label: "Sesler",
+    on: "bg-rose-600 text-white shadow-sm",
+    off: "bg-rose-100 text-rose-800 hover:bg-rose-200 dark:bg-rose-950/50 dark:text-rose-200 dark:hover:bg-rose-900/60",
+  },
 ] as const;
 
 type KindFilter = (typeof KIND_FILTERS)[number]["key"];
 
 function statusOf(post: AdminPostCard) {
   if (post.deletedAt) {
-    return { label: "Silindi", hidden: true };
+    return { key: "removed" as const, label: "Galeriden çıktı" };
   }
   if (post.hiddenAt) {
-    return { label: "Gizli", hidden: true };
+    return { key: "hidden" as const, label: "Gizli" };
   }
   if (post.expiresAt && new Date(post.expiresAt).getTime() < Date.now()) {
-    return { label: "Süresi doldu", hidden: true };
+    return { key: "hidden" as const, label: "Süresi doldu" };
   }
-  return { label: "Yayında", hidden: false };
+  return { key: "live" as const, label: "Yayında" };
 }
 
 function formatBytes(bytes: number) {
@@ -70,19 +92,24 @@ function sortPosts(posts: AdminPostCard[], sort: GallerySort) {
 export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
   const router = useRouter();
   const [open, setOpen] = useState<AdminPostCard | null>(null);
-  const [filter, setFilter] = useState<"all" | "live" | "hidden">("all");
+  const [filter, setFilter] = useState<"all" | "live" | "hidden" | "removed">("all");
   const [kind, setKind] = useState<KindFilter>("all");
   const [owner, setOwner] = useState("all");
   const [sort, setSort] = useState<GallerySort>({ key: "date", dir: "desc" });
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [tagOverrides, setTagOverrides] = useState<Record<string, string[]>>({});
   const [saveNote, setSaveNote] = useState<{ text: string; url?: string } | null>(null);
   const [ask, setAsk] = useState<{ message: string; run: () => Promise<void> } | null>(null);
+  const items = useMemo(
+    () => posts.map((post) => (tagOverrides[post.id] ? { ...post, tags: tagOverrides[post.id] } : post)),
+    [posts, tagOverrides],
+  );
 
   const owners = useMemo(() => {
     const map = new Map<string, string>();
-    for (const post of posts) {
+    for (const post of items) {
       const list = post.holders.length
         ? post.holders
         : [{ id: post.userId ?? "guest", name: post.ownerName?.trim() || (post.userId ? "Üye" : "Misafir") }];
@@ -93,10 +120,10 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       }
     }
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "tr"));
-  }, [posts]);
+  }, [items]);
 
   const filtered = useMemo(() => {
-    const next = posts.filter((post) => {
+    const next = items.filter((post) => {
       if (kind !== "all" && post.type !== kind) {
         return false;
       }
@@ -106,25 +133,46 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           return false;
         }
       }
-      if (tagFilter && !postHasTag(post.tags, tagFilter)) {
+      if (!matchesTagFilter(post.tags, tagFilter)) {
         return false;
       }
-      const hidden = statusOf(post).hidden;
-      if (filter === "live") {
-        return !hidden;
+      const status = statusOf(post).key;
+      if (filter === "all") {
+        return true;
       }
-      if (filter === "hidden") {
-        return hidden;
-      }
-      return true;
+      return status === filter;
     });
     return sortPosts(next, sort);
-  }, [posts, filter, kind, owner, sort, tagFilter]);
+  }, [items, filter, kind, owner, sort, tagFilter]);
 
   const allBytes = filtered.reduce((sum, post) => sum + post.size, 0);
-  const tags = uniqueTags(posts);
-  const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
-  const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
+  const tags = uniqueTags(items);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const allFiltered = filtered.length > 0 && filtered.every((post) => selectedSet.has(post.id));
+  const selectedUrls = filtered.filter((post) => selectedSet.has(post.id)).map((post) => post.pageUrl);
+  const tableRows = useMemo(
+    () =>
+      filtered.map((post) => ({
+        ...post,
+        owner:
+          post.holders.length > 0
+            ? post.holders.map((holder) => holder.name).join(", ")
+            : "—",
+      })),
+    [filtered],
+  );
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
+  const toggleSelected = useCallback((id: string) => {
+    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  }, []);
+  const openSelected = useCallback((id: string) => {
+    const post = filteredRef.current.find((item) => item.id === id) ?? null;
+    if (post?.src) {
+      prefetchMedia(post.src);
+    }
+    setOpen(post);
+  }, []);
 
   useEffect(() => {
     setSelected([]);
@@ -172,12 +220,12 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
     }
   }
 
-  async function run(kod: string, action: "restore" | "hide" | "purge") {
+  async function run(kod: string, action: "restore" | "hide" | "purge" | "remove") {
     setBusy(true);
     await fetch(`/api/admin/posts/${kod}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ownerId: owner }),
     });
     setBusy(false);
     if (open?.id === kod && action === "purge") {
@@ -188,6 +236,18 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
 
   async function patchOpen(body: Record<string, unknown>) {
     if (!open) {
+      return;
+    }
+    if ("tags" in body) {
+      const tags = cleanTags(body.tags);
+      const kod = open.id;
+      setTagOverrides((current) => ({ ...current, [kod]: tags }));
+      setOpen((current) => (current ? { ...current, tags } : current));
+      void fetch(`/api/posts/${kod}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags }),
+      }).then(() => router.refresh());
       return;
     }
     setBusy(true);
@@ -231,7 +291,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       return;
     }
     setBusy(true);
-    const byId = new Map(posts.map((post) => [post.id, post]));
+    const byId = new Map(items.map((post) => [post.id, post]));
     await Promise.all(
       ids.map((kod) => {
         const post = byId.get(kod);
@@ -253,24 +313,29 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
     router.refresh();
   }
 
-  async function tagSelected(tag: string) {
-    if (selected.length === 0 || tag.trim().length < 2) {
+  function tagSelected(tag: string, mode: "add" | "remove" = "add") {
+    const extra = cleanTags(tag);
+    if (selected.length === 0 || (mode === "add" && extra.length === 0)) {
       return;
     }
-    setBusy(true);
-    const byId = new Map(posts.map((post) => [post.id, post]));
-    await Promise.all(
-      selected.map((kod) => {
-        const post = byId.get(kod);
-        return fetch(`/api/posts/${kod}`, {
+    const ids = [...selected];
+    const byId = new Map(items.map((post) => [post.id, post]));
+    const nextTags: Record<string, string[]> = {};
+    for (const kod of ids) {
+      const current = byId.get(kod)?.tags ?? [];
+      nextTags[kod] = mode === "remove" ? withoutTags(current, extra) : cleanTags([...current, ...extra]);
+    }
+    setTagOverrides((current) => ({ ...current, ...nextTags }));
+    setOpen((current) => (current && nextTags[current.id] ? { ...current, tags: nextTags[current.id] } : current));
+    void Promise.all(
+      ids.map((kod) =>
+        fetch(`/api/posts/${kod}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tags: cleanTags([...(post?.tags ?? []), tag]) }),
-        });
-      }),
-    );
-    setBusy(false);
-    router.refresh();
+          body: JSON.stringify({ tags: nextTags[kod] }),
+        }),
+      ),
+    ).then(() => router.refresh());
   }
 
   async function applySelectedTtl(ttl: string) {
@@ -288,6 +353,26 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
       ),
     );
     setBusy(false);
+    router.refresh();
+  }
+
+  async function removeSelected() {
+    if (selected.length === 0) {
+      return;
+    }
+    setBusy(true);
+    await Promise.all(
+      selected.map((kod) =>
+        fetch(`/api/admin/posts/${kod}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "remove", ownerId: owner }),
+        }),
+      ),
+    );
+    setBusy(false);
+    setAsk(null);
+    setSelected([]);
     router.refresh();
   }
 
@@ -313,7 +398,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
 
   return (
     <>
-      <div className="space-y-3">
+      <div className="gallery-shell space-y-3">
         <div className="gallery-toolbar space-y-2">
         <div className="flex items-center justify-between gap-3">
           <h1 className="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-white sm:text-lg">Yüklemeler</h1>
@@ -334,7 +419,7 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
             ) : null}
           </p>
         ) : null}
-        <div className="grid grid-cols-4 gap-0.5 rounded-xl bg-slate-100 p-0.5 dark:bg-slate-800">
+        <div className="grid grid-cols-4 gap-1">
           {KIND_FILTERS.map((item) => {
             const active = kind === item.key;
             return (
@@ -342,8 +427,8 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
                 key={item.key}
                 type="button"
                 onClick={() => setKind(item.key)}
-                className={`min-h-8 truncate rounded-lg text-[11px] font-medium sm:text-xs ${
-                  active ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white" : "text-slate-500 dark:text-slate-400"
+                className={`min-h-9 truncate rounded-xl px-1 text-[11px] font-semibold sm:text-xs ${
+                  active ? item.on : item.off
                 }`}
               >
                 {item.label === "Resimler" ? "Resim" : item.label === "Videolar" ? "Video" : item.label === "Sesler" ? "Ses" : item.label}
@@ -373,9 +458,10 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
             <option value="all">Tümü</option>
             <option value="live">Yayında</option>
             <option value="hidden">Gizli</option>
+            <option value="removed">Galeriden silinenler</option>
           </select>
         </div>
-        <TagChips tags={tags} active={tagFilter} onPick={setTagFilter} />
+        <TagChips tags={tags} active={tagFilter} onPick={(tag) => setTagFilter((current) => toggleTagFilter(current, tag))} />
         <GalleryBulkBar
           selectedCount={selected.length}
           allSelected={allFiltered}
@@ -385,36 +471,37 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
           onSelectAll={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
           onHide={() => void setHidden(selected, true)}
           onPublish={() => void setHidden(selected, false)}
+          onRemove={() =>
+            setAsk({
+              message:
+                owner === "all"
+                  ? `${selected.length} kaydı kullanıcı galerilerinden çıkarmak istiyor musun? Dosya kalıcı silinmez.`
+                  : `${selected.length} kaydı bu kullanıcının galerisinden çıkarmak istiyor musun? Dosya kalıcı silinmez.`,
+              run: removeSelected,
+            })
+          }
           onDelete={() =>
             setAsk({
               message: `${selected.length} kaydı kalıcı silmek istiyor musun?`,
               run: purgeSelected,
             })
           }
-          onTag={(tag) => void tagSelected(tag)}
+          onTag={(tag, mode) => void tagSelected(tag, mode)}
           onTtl={(ttl) => void applySelectedTtl(ttl)}
         />
         </div>
 
         <GalleryListTable
-          rows={filtered.map((post) => ({
-            ...post,
-            owner:
-              post.holders.length > 0
-                ? post.holders.map((holder) => holder.name).join(", ")
-                : (post.ownerName ?? "Misafir"),
-          }))}
+          rows={tableRows}
           selected={selected}
           allSelected={allFiltered}
           showOwner
           showViews
           sort={sort}
           onSort={setSort}
-          onToggle={(id) =>
-            setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
-          }
+          onToggle={toggleSelected}
           onToggleAll={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
-          onOpen={(id) => setOpen(filtered.find((post) => post.id === id) ?? null)}
+          onOpen={openSelected}
         />
       </div>
       {open ? (
@@ -431,19 +518,24 @@ export function AdminGallery({ posts }: { posts: AdminPostCard[] }) {
             <ModalCloseButton onClick={() => setOpen(null)} />
             <div className="max-h-[92vh] overflow-y-auto p-4 pr-16 sm:p-6 sm:pr-20">
               <p className="mb-3 text-sm text-slate-500">
-                {open.holders.length > 0 ? open.holders.map((holder) => holder.name).join(", ") : (open.ownerName ?? "Misafir")}
+                {open.holders.length > 0
+                  ? open.holders.map((holder) => holder.name).join(", ")
+                  : open.ownerName && open.ownerName !== "—"
+                    ? open.ownerName
+                    : "Galeride yok"}
               </p>
               <MediaPreview type={open.type} src={open.src} />
               <MediaEditPanel
                 post={{ ...open, hiddenAt: open.hiddenAt ?? null }}
                 pending={busy}
+                deleteLabel="Galeriden çıkar"
                 tagError={saveNote && !saveNote.url ? saveNote.text : ""}
                 onPatch={(body) => patchOpen(body)}
                 onDelete={() =>
                   setAsk({
-                    message: "Bu kaydı kalıcı silmek istiyor musun?",
+                    message: "Bu kaydı kullanıcının galerisinden çıkarmak istiyor musun? Dosya kalıcı silinmez.",
                     run: async () => {
-                      await run(open.id, "purge");
+                      await run(open.id, "remove");
                       setAsk(null);
                     },
                   })

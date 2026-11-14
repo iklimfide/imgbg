@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { GalleryBulkBar } from "@/components/GalleryBulkBar";
@@ -9,7 +9,8 @@ import { MediaEditPanel } from "@/components/MediaEditPanel";
 import { MediaPreview } from "@/components/MediaPreview";
 import { ModalCloseButton } from "@/components/ModalCloseButton";
 import { TagChips } from "@/components/TagEditor";
-import { cleanTags, postHasTag, uniqueTags } from "@/lib/tags";
+import { prefetchMedia } from "@/lib/media-cache";
+import { cleanTags, matchesTagFilter, toggleTagFilter, uniqueTags, withoutTags } from "@/lib/tags";
 
 export type ProfilePostCard = {
   id: string;
@@ -25,14 +26,39 @@ export type ProfilePostCard = {
   createdAt: string;
   pageUrl: string;
   src: string;
+  thumbSrc: string;
   tags: string[];
 };
 
 const FILTERS = [
-  { key: "all", label: "Tümü", short: "Tümü" },
-  { key: "image", label: "Resimlerim", short: "Resim" },
-  { key: "video", label: "Videolarım", short: "Video" },
-  { key: "audio", label: "Seslerim", short: "Ses" },
+  {
+    key: "all",
+    label: "Tümü",
+    short: "Tümü",
+    on: "bg-sky-600 text-white shadow-sm",
+    off: "bg-sky-100 text-sky-800 hover:bg-sky-200 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/60",
+  },
+  {
+    key: "image",
+    label: "Resimlerim",
+    short: "Resim",
+    on: "bg-violet-600 text-white shadow-sm",
+    off: "bg-violet-100 text-violet-800 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:hover:bg-violet-900/60",
+  },
+  {
+    key: "video",
+    label: "Videolarım",
+    short: "Video",
+    on: "bg-fuchsia-600 text-white shadow-sm",
+    off: "bg-fuchsia-100 text-fuchsia-800 hover:bg-fuchsia-200 dark:bg-fuchsia-950/50 dark:text-fuchsia-200 dark:hover:bg-fuchsia-900/60",
+  },
+  {
+    key: "audio",
+    label: "Seslerim",
+    short: "Ses",
+    on: "bg-rose-600 text-white shadow-sm",
+    off: "bg-rose-100 text-rose-800 hover:bg-rose-200 dark:bg-rose-950/50 dark:text-rose-200 dark:hover:bg-rose-900/60",
+  },
 ] as const;
 
 type GalleryFilter = (typeof FILTERS)[number]["key"];
@@ -59,14 +85,34 @@ export function ProfileUploads({
   const [askDeleteOpen, setAskDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tagError, setTagError] = useState("");
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [tagOverrides, setTagOverrides] = useState<Record<string, string[]>>({});
+  const items = useMemo(
+    () => posts.map((post) => (tagOverrides[post.id] ? { ...post, tags: tagOverrides[post.id] } : post)),
+    [posts, tagOverrides],
+  );
 
-  const byType = filter === "all" ? posts : posts.filter((post) => post.type === filter);
-  const tagged = tagFilter ? byType.filter((post) => postHasTag(post.tags, tagFilter)) : byType;
-  const filtered = useMemo(() => sortPosts(tagged, sort), [tagged, sort]);
-  const tags = uniqueTags(posts);
-  const allFiltered = filtered.length > 0 && filtered.every((post) => selected.includes(post.id));
-  const selectedUrls = filtered.filter((post) => selected.includes(post.id)).map((post) => post.pageUrl);
+  const filtered = useMemo(() => {
+    const byType = filter === "all" ? items : items.filter((post) => post.type === filter);
+    const tagged = byType.filter((post) => matchesTagFilter(post.tags, tagFilter));
+    return sortPosts(tagged, sort);
+  }, [items, filter, tagFilter, sort]);
+  const tags = uniqueTags(items);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const allFiltered = filtered.length > 0 && filtered.every((post) => selectedSet.has(post.id));
+  const selectedUrls = filtered.filter((post) => selectedSet.has(post.id)).map((post) => post.pageUrl);
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
+  const toggleSelected = useCallback((id: string) => {
+    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  }, []);
+  const openSelected = useCallback((id: string) => {
+    const post = filteredRef.current.find((item) => item.id === id) ?? null;
+    if (post?.src) {
+      prefetchMedia(post.src);
+    }
+    setOpen(post);
+  }, []);
   const heading =
     filter === "video" ? `${ownerName}'in Videoları` : filter === "audio" ? `${ownerName}'in Sesleri` : `${ownerName}'in Resimleri`;
 
@@ -109,24 +155,29 @@ export function ProfileUploads({
     router.refresh();
   }
 
-  async function tagSelected(tag: string) {
-    if (selected.length === 0 || tag.trim().length < 2) {
+  function tagSelected(tag: string, mode: "add" | "remove" = "add") {
+    const extra = cleanTags(tag);
+    if (selected.length === 0 || (mode === "add" && extra.length === 0)) {
       return;
     }
-    setBusy(true);
-    const byId = new Map(posts.map((post) => [post.id, post]));
-    await Promise.all(
-      selected.map((kod) => {
-        const post = byId.get(kod);
-        return fetch(`/api/posts/${kod}`, {
+    const ids = [...selected];
+    const byId = new Map(items.map((post) => [post.id, post]));
+    const nextTags: Record<string, string[]> = {};
+    for (const kod of ids) {
+      const current = byId.get(kod)?.tags ?? [];
+      nextTags[kod] = mode === "remove" ? withoutTags(current, extra) : cleanTags([...current, ...extra]);
+    }
+    setTagOverrides((current) => ({ ...current, ...nextTags }));
+    setOpen((current) => (current && nextTags[current.id] ? { ...current, tags: nextTags[current.id] } : current));
+    void Promise.all(
+      ids.map((kod) =>
+        fetch(`/api/posts/${kod}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tags: cleanTags([...(post?.tags ?? []), tag]) }),
-        });
-      }),
-    );
-    setBusy(false);
-    router.refresh();
+          body: JSON.stringify({ tags: nextTags[kod] }),
+        }),
+      ),
+    ).then(() => router.refresh());
   }
 
   async function applySelectedTtl(ttl: string) {
@@ -149,6 +200,18 @@ export function ProfileUploads({
 
   async function patchOpen(body: Record<string, unknown>) {
     if (!open) {
+      return;
+    }
+    if ("tags" in body) {
+      const tags = cleanTags(body.tags);
+      const kod = open.id;
+      setTagOverrides((current) => ({ ...current, [kod]: tags }));
+      setOpen((current) => (current ? { ...current, tags } : current));
+      void fetch(`/api/posts/${kod}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags }),
+      }).then(() => router.refresh());
       return;
     }
     setBusy(true);
@@ -222,7 +285,7 @@ export function ProfileUploads({
 
   return (
     <>
-      <div className="space-y-3">
+      <div className="gallery-shell space-y-3">
         <div className="gallery-toolbar space-y-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-white sm:text-lg">{heading}</h2>
@@ -232,7 +295,7 @@ export function ProfileUploads({
             </span>
           ) : null}
         </div>
-        <div className="grid grid-cols-4 gap-0.5 rounded-xl bg-slate-100 p-0.5 dark:bg-slate-800">
+        <div className="grid grid-cols-4 gap-1">
           {FILTERS.map((item) => {
             const active = filter === item.key;
             return (
@@ -240,8 +303,8 @@ export function ProfileUploads({
                 key={item.key}
                 type="button"
                 onClick={() => setFilter(item.key)}
-                className={`min-h-8 truncate rounded-lg text-[11px] font-medium sm:text-xs ${
-                  active ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white" : "text-slate-500 dark:text-slate-400"
+                className={`min-h-9 truncate rounded-xl px-1 text-[11px] font-semibold sm:text-xs ${
+                  active ? item.on : item.off
                 }`}
               >
                 <span className="sm:hidden">{item.short}</span>
@@ -250,7 +313,7 @@ export function ProfileUploads({
             );
           })}
         </div>
-        <TagChips tags={tags} active={tagFilter} onPick={setTagFilter} />
+        <TagChips tags={tags} active={tagFilter} onPick={(tag) => setTagFilter((current) => toggleTagFilter(current, tag))} />
         <GalleryBulkBar
           selectedCount={selected.length}
           allSelected={allFiltered}
@@ -260,7 +323,7 @@ export function ProfileUploads({
           onHide={() => void setHidden(selected, true)}
           onPublish={() => void setHidden(selected, false)}
           onDelete={() => setAskDelete(true)}
-          onTag={(tag) => void tagSelected(tag)}
+          onTag={(tag, mode) => void tagSelected(tag, mode)}
           onTtl={(ttl) => void applySelectedTtl(ttl)}
         />
         </div>
@@ -275,11 +338,9 @@ export function ProfileUploads({
             showViews
             sort={sort}
             onSort={setSort}
-            onToggle={(id) =>
-              setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
-            }
+            onToggle={toggleSelected}
             onToggleAll={() => setSelected(allFiltered ? [] : filtered.map((post) => post.id))}
-            onOpen={(id) => setOpen(filtered.find((post) => post.id === id) ?? null)}
+            onOpen={openSelected}
           />
         )}
       </div>

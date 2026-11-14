@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 
 function applyTheme(dark: boolean) {
   document.documentElement.classList.toggle("dark", dark);
-  localStorage.setItem("theme", dark ? "dark" : "light");
+  const value = dark ? "dark" : "light";
+  localStorage.setItem("theme", value);
+  document.cookie = `theme=${value}; path=/; max-age=31536000; samesite=lax`;
 }
 
 export function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
+    const stored = localStorage.getItem("theme") === "dark";
+    applyTheme(stored);
+    setDark(stored);
   }, []);
 
   return (

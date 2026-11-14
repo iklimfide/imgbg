@@ -7,7 +7,7 @@ export async function Header() {
   const session = await getSession();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
+    <header className="sticky top-0 z-20 border-b border-slate-200 bg-[#f3f5fb] dark:border-slate-800 dark:bg-slate-950">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4 sm:h-16 sm:px-6">
         <HeaderBrand />
         <HeaderMenu

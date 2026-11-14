@@ -5,7 +5,8 @@ import { hashSharePassword } from "@/lib/password";
 import { fileBaseName, findExistingUpload } from "@/lib/existing-upload";
 import { guestKeyFromRequest, usedStorage } from "@/lib/posts";
 import { fileLimit, formatMb, resolveExpiry, storageLimit, ttlLabel } from "@/lib/quota";
-import { ensureR2Cors, headFromR2, isR2Configured, signedPutUrl } from "@/lib/r2";
+import { ensureR2Cors, headFromR2, isR2Configured, signedPutUrl, thumbR2Key } from "@/lib/r2";
+import { ensureThumb } from "@/lib/thumb";
 import { rateLimit } from "@/lib/rate-limit";
 import { getSession } from "@/lib/session";
 import { createShortCode } from "@/lib/short-code";
@@ -138,7 +139,8 @@ async function prepareUpload(body: PrepareBody, ctx: Ctx) {
     const r2Key = `uploads/${folder}/${kod}.${meta.ext}`;
     await ensureR2Cors();
     const putUrl = await signedPutUrl(r2Key, mimeHint);
-    return Response.json({ kod, r2Key, putUrl, mime: mimeHint, ext: meta.ext });
+    const thumbPutUrl = meta.type === "video" ? await signedPutUrl(thumbR2Key(r2Key), "image/webp") : undefined;
+    return Response.json({ kod, r2Key, putUrl, thumbPutUrl, mime: mimeHint, ext: meta.ext });
   } catch (cause) {
     return jsonError("PREPARE", failMessage(cause), 500);
   }
@@ -189,6 +191,10 @@ async function completeUpload(body: PrepareBody, ctx: Ctx) {
       expiresAt,
       createdAt: new Date(),
     });
+
+    if (meta.type === "image") {
+      await ensureThumb(r2Key).catch(() => undefined);
+    }
 
     return Response.json({
       kod,

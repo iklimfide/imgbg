@@ -53,12 +53,11 @@ html.mobile-preview body {
   z-index: 15;
   margin-inline: -1rem;
   padding: 0.4rem 1rem 0.6rem;
-  background: color-mix(in srgb, #f3f5fb 94%, transparent);
-  backdrop-filter: blur(12px);
+  background: #f3f5fb;
 }
 
 .dark .gallery-toolbar {
-  background: color-mix(in srgb, #020617 92%, transparent);
+  background: #020617;
 }
 
 @media (min-width: 640px) {

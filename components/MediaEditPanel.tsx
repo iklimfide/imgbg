@@ -21,12 +21,14 @@ export function MediaEditPanel({
   post,
   pending,
   tagError,
+  deleteLabel = "Sil",
   onPatch,
   onDelete,
 }: {
   post: EditableMedia;
   pending?: boolean;
   tagError?: string;
+  deleteLabel?: string;
   onPatch: (body: Record<string, unknown>) => Promise<void>;
   onDelete: () => void;
 }) {

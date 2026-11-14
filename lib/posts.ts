@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { posts, type Post } from "@/db/schema";
-import { deleteFromR2, isR2Configured } from "@/lib/r2";
+import { deleteFromR2, isR2Configured, thumbR2Key } from "@/lib/r2";
 import { serializeTags } from "@/lib/tags";
 
 export function guestKeyFromRequest(request: Request) {
@@ -106,6 +106,35 @@ export async function restorePost(kod: string) {
     .where(eq(posts.id, kod));
 }
 
+function galleryScope(r2Key: string, ownerId?: string | null) {
+  const filters = [eq(posts.r2Key, r2Key)];
+  if (ownerId && ownerId !== "all") {
+    filters.push(ownerId === "guest" ? isNull(posts.userId) : eq(posts.userId, ownerId));
+  }
+  return and(...filters);
+}
+
+export async function removeFromGalleries(kod: string, ownerId?: string | null) {
+  const post = await getPost(kod);
+  if (!post) {
+    return;
+  }
+  const db = await getDb();
+  await db
+    .update(posts)
+    .set({ deletedAt: new Date() })
+    .where(and(galleryScope(post.r2Key, ownerId), isNull(posts.deletedAt)));
+}
+
+export async function restoreFromGalleries(kod: string, ownerId?: string | null) {
+  const post = await getPost(kod);
+  if (!post) {
+    return;
+  }
+  const db = await getDb();
+  await db.update(posts).set({ deletedAt: null }).where(galleryScope(post.r2Key, ownerId));
+}
+
 export async function purgePost(kod: string) {
   const post = await getPost(kod);
   if (!post) {
@@ -118,6 +147,7 @@ export async function purgePost(kod: string) {
     .where(and(eq(posts.r2Key, post.r2Key), ne(posts.id, kod)))
     .limit(1);
   if (!shared && isR2Configured()) {
+    await deleteFromR2(thumbR2Key(post.r2Key)).catch(() => undefined);
     await deleteFromR2(post.r2Key).catch(() => undefined);
   }
   await db.delete(posts).where(eq(posts.id, kod));

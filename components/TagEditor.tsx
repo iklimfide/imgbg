@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MAX_TAG_LEN } from "@/lib/tags";
+import { cleanTags, MAX_TAG_LEN, UNTAGGED } from "@/lib/tags";
 
 export function TagChips({
   tags,
@@ -9,32 +9,43 @@ export function TagChips({
   onPick,
 }: {
   tags: string[];
-  active?: string | null;
+  active?: string | string[] | null;
   onPick: (tag: string | null) => void;
 }) {
-  if (tags.length === 0) {
-    return null;
-  }
+  const selected = !active ? [] : Array.isArray(active) ? active : [active];
+  const none = selected.includes(UNTAGGED);
+  const allOff = selected.length === 0;
   return (
     <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <button
         type="button"
         onClick={() => onPick(null)}
         className={`inline-flex min-h-8 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium sm:text-xs ${
-          !active
+          allOff
             ? "bg-sky-600 text-white"
             : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
         }`}
       >
         Tümü
       </button>
+      <button
+        type="button"
+        onClick={() => onPick(none ? null : UNTAGGED)}
+        className={`inline-flex min-h-8 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium sm:text-xs ${
+          none
+            ? "bg-amber-600 text-white"
+            : "bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-200"
+        }`}
+      >
+        Etiketsiz
+      </button>
       {tags.map((tag) => {
-        const on = active?.toLocaleLowerCase("tr") === tag.toLocaleLowerCase("tr");
+        const on = selected.some((item) => item.toLocaleLowerCase("tr") === tag.toLocaleLowerCase("tr"));
         return (
           <button
             key={tag}
             type="button"
-            onClick={() => onPick(on ? null : tag)}
+            onClick={() => onPick(tag)}
             className={`inline-flex min-h-8 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium sm:text-xs ${
               on
                 ? "bg-violet-600 text-white"
@@ -61,11 +72,11 @@ export function TagEditor({
   const [draft, setDraft] = useState("");
 
   function add() {
-    const next = draft.trim();
-    if (next.length < 2) {
+    const extra = cleanTags(draft);
+    if (extra.length === 0) {
       return;
     }
-    onChange([...tags, next]);
+    onChange(cleanTags([...tags, ...extra]));
     setDraft("");
   }
 
@@ -90,9 +101,9 @@ export function TagEditor({
       <div className="flex gap-2">
         <input
           value={draft}
-          maxLength={MAX_TAG_LEN}
+          maxLength={MAX_TAG_LEN * 4}
           disabled={pending}
-          placeholder="Etiket ekle"
+          placeholder="komik, hazal, ben"
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -104,7 +115,7 @@ export function TagEditor({
         />
         <button
           type="button"
-          disabled={pending || draft.trim().length < 2}
+          disabled={pending || cleanTags(draft).length === 0}
           onClick={add}
           className="min-h-10 rounded-xl bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
         >

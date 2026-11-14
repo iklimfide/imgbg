@@ -6,7 +6,7 @@ import { posts } from "@/db/schema";
 import { notRemoved, usedStorage } from "@/lib/posts";
 import { formatMb, MEMBER_STORAGE_MAX_BYTES } from "@/lib/quota";
 import { getSession } from "@/lib/session";
-import { publicMediaUrl } from "@/lib/r2";
+import { publicMediaUrl, publicThumbUrl } from "@/lib/r2";
 import { getSiteUrl, shareUrl } from "@/lib/site";
 import { parseTags } from "@/lib/tags";
 
@@ -49,6 +49,10 @@ export default async function GaleriPage() {
     createdAt: iso(post.createdAt),
     pageUrl: shareUrl(post.id, origin),
     src: publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash)),
+    thumbSrc:
+      post.type === "image" || post.type === "video"
+        ? publicThumbUrl(post.id, post.r2Key, Boolean(post.passwordHash))
+        : publicMediaUrl(post.id, post.r2Key, Boolean(post.passwordHash)),
     tags: parseTags(post.tags),
   }));
 

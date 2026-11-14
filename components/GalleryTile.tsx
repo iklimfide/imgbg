@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { remainingLabel } from "@/components/MediaStatusBadges";
 import { CopyButton } from "@/components/CopyLink";
-import { markMediaShown, mediaWasShown, warmMedia } from "@/lib/media-cache";
+import { markMediaShown, mediaWasShown, objectUrlFromCache, prefetchMedia, warmMedia } from "@/lib/media-cache";
+import { posterFromVideoUrl } from "@/lib/video-poster";
 
 export function formatBytes(bytes: number) {
   const mb = bytes / (1024 * 1024);
@@ -24,13 +25,21 @@ export function typeLabel(type: "image" | "video" | "audio") {
 }
 
 export function formatWhen(iso: string) {
-  return new Date(iso).toLocaleString("tr-TR", {
-    day: "numeric",
-    month: "numeric",
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul",
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  });
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("day")}.${value("month")}.${value("year")} ${value("hour")}:${value("minute")}`;
 }
 
 export function fileLabel(name: string | null, id: string) {
@@ -45,15 +54,48 @@ export function fileLabel(name: string | null, id: string) {
   }
 }
 
-export function GalleryThumb({
+export const GalleryThumb = memo(function GalleryThumb({
   type,
   src,
+  fullSrc,
+  kod,
+  eager = false,
 }: {
   type: "image" | "video" | "audio";
   src: string;
+  fullSrc?: string;
+  kod?: string;
+  eager?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const [live, setLive] = useState(() => mediaWasShown(src));
+  const [failed, setFailed] = useState(false);
+  const displaySrc = failed && fullSrc ? fullSrc : src;
+  const [live, setLive] = useState(eager);
+  const [cachedSrc, setCachedSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let created: string | null = null;
+    void objectUrlFromCache(displaySrc).then((url) => {
+      if (!url) {
+        return;
+      }
+      if (!active) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      created = url;
+      setCachedSrc(url);
+      setLive(true);
+      markMediaShown(displaySrc);
+    });
+    return () => {
+      active = false;
+      if (created) {
+        URL.revokeObjectURL(created);
+      }
+    };
+  }, [displaySrc]);
 
   useEffect(() => {
     if (live) {
@@ -72,11 +114,43 @@ export function GalleryThumb({
           observer.disconnect();
         }
       },
-      { rootMargin: "480px" },
+      { rootMargin: "1800px" },
     );
     observer.observe(node);
     return () => observer.disconnect();
   }, [live, src]);
+
+  const [videoFallback, setVideoFallback] = useState(false);
+  const [localPoster, setLocalPoster] = useState<string | null>(null);
+  const savingPoster = useRef(false);
+
+  useEffect(() => {
+    if (type !== "video" || !videoFallback || !kod || savingPoster.current) {
+      return;
+    }
+    savingPoster.current = true;
+    let cancelled = false;
+    void posterFromVideoUrl(`/api/media/${kod}?capture=1`)
+      .then(async (blob) => {
+        if (!blob || cancelled) {
+          return;
+        }
+        const posterUrl = URL.createObjectURL(blob);
+        setLocalPoster(posterUrl);
+        setVideoFallback(false);
+        await fetch(`/api/thumb/${kod}`, {
+          method: "POST",
+          headers: { "Content-Type": blob.type || "image/webp" },
+          body: blob,
+        }).catch(() => undefined);
+      })
+      .catch(() => {
+        savingPoster.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kod, type, videoFallback]);
 
   if (type === "audio") {
     return (
@@ -88,29 +162,55 @@ export function GalleryThumb({
 
   return (
     <div ref={root} className="h-full w-full bg-slate-200 dark:bg-slate-800">
-      {live && type === "video" ? (
-        <video src={src} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+      {live && type === "video" && !videoFallback ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={localPoster ?? cachedSrc ?? src}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => {
+            if (!localPoster) {
+              setVideoFallback(true);
+            }
+          }}
+          onLoad={() => {
+            prefetchMedia(src);
+            void warmMedia(src);
+          }}
+        />
+      ) : null}
+      {live && type === "video" && videoFallback ? (
+        <video src={fullSrc ?? src} muted playsInline preload="metadata" className="h-full w-full object-cover" />
       ) : null}
       {live && type === "image" ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={src}
+          src={cachedSrc ?? displaySrc}
           alt=""
           decoding="async"
+          fetchPriority={eager ? "high" : "low"}
+          loading={eager ? "eager" : "lazy"}
           className="h-full w-full object-cover"
+          onError={() => {
+            if (fullSrc && !failed) {
+              setFailed(true);
+            }
+          }}
           onLoad={() => {
-            void warmMedia(src);
+            prefetchMedia(displaySrc);
+            void warmMedia(displaySrc);
           }}
         />
       ) : null}
     </div>
   );
-}
+});
 
 export type GalleryListItem = {
   id: string;
   type: "image" | "video" | "audio";
   src: string;
+  thumbSrc?: string;
   originalName: string | null;
   passwordHash: string | null;
   hiddenAt?: string | null;
@@ -156,7 +256,7 @@ function toggleSort(current: GallerySort, key: GallerySortKey): GallerySort {
 
 function statusText(post: GalleryListItem) {
   if (post.deletedAt) {
-    return "Silindi";
+    return "Galeriden çıktı";
   }
   if (post.hiddenAt) {
     return "Gizli";
@@ -179,23 +279,113 @@ function SortHead({
 }) {
   const active = Boolean(dir);
   return (
-    <th className="px-2 py-3">
-      <button
-        type="button"
-        onClick={onClick}
-        className={`inline-flex items-center gap-1 text-left text-xs font-medium ${
-          active ? "text-sky-700 dark:text-sky-300" : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-        }`}
-      >
-        <span>{label}</span>
-        <span className="inline-flex flex-col text-[8px] leading-[0.65] tracking-tighter" aria-hidden>
-          <span className={dir === "asc" ? "text-sky-700 dark:text-sky-300" : "text-slate-300 dark:text-slate-600"}>▲</span>
-          <span className={dir === "desc" ? "text-sky-700 dark:text-sky-300" : "text-slate-300 dark:text-slate-600"}>▼</span>
-        </span>
-      </button>
-    </th>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 text-left text-xs font-medium ${
+        active ? "text-sky-700 dark:text-sky-300" : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+      }`}
+    >
+      <span>{label}</span>
+      <span className="inline-flex flex-col text-[8px] leading-[0.65] tracking-tighter" aria-hidden>
+        <span className={dir === "asc" ? "text-sky-700 dark:text-sky-300" : "text-slate-300 dark:text-slate-600"}>▲</span>
+        <span className={dir === "desc" ? "text-sky-700 dark:text-sky-300" : "text-slate-300 dark:text-slate-600"}>▼</span>
+      </span>
+    </button>
   );
 }
+
+const GalleryCard = memo(function GalleryCard({
+  post,
+  checked,
+  showOwner,
+  showViews,
+  eagerThumb,
+  onToggle,
+  onOpen,
+}: {
+  post: GalleryListItem;
+  checked: boolean;
+  showOwner?: boolean;
+  showViews?: boolean;
+  eagerThumb?: boolean;
+  onToggle: (id: string) => void;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <div className={`overflow-hidden rounded-2xl ${checked ? "bg-slate-900" : "bg-transparent"}`}>
+      <article
+        role="button"
+        tabIndex={0}
+        onClick={() => onToggle(post.id)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggle(post.id);
+          }
+        }}
+        className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-2 ${
+          checked
+            ? "scale-[0.96] border-violet-400 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/40"
+            : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onClick={(event) => event.stopPropagation()}
+          onChange={() => onToggle(post.id)}
+          aria-label="Seç"
+          className="shrink-0"
+        />
+        <button
+          type="button"
+          onPointerEnter={() => prefetchMedia(post.src)}
+          onPointerDown={() => prefetchMedia(post.src)}
+          onClick={(event) => {
+            event.stopPropagation();
+            prefetchMedia(post.src);
+            onOpen(post.id);
+          }}
+          className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-800"
+        >
+          <GalleryThumb
+            type={post.type}
+            src={post.thumbSrc ?? post.src}
+            fullSrc={post.src}
+            kod={post.id}
+            eager={eagerThumb}
+          />
+        </button>
+        <div className="min-w-0 flex-1 space-y-1 text-sm">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-slate-500">
+            <span>{statusText(post)}</span>
+            {post.passwordHash ? <span className="text-xs text-violet-600">Şifreli</span> : null}
+            {showOwner ? <span className="text-slate-700 dark:text-slate-200">{post.owner ?? "Misafir"}</span> : null}
+            <span>{typeLabel(post.type)}</span>
+            <span>{formatBytes(post.size)}</span>
+            {showViews ? <span>{post.views ?? 0} görüntü</span> : null}
+            <span className="text-slate-600 dark:text-slate-300">{formatWhen(post.createdAt)}</span>
+            {post.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-medium text-violet-800 dark:bg-violet-950/60 dark:text-violet-200"
+              >
+                #{tag}
+              </span>
+            ))}
+          </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate text-sky-600">{post.pageUrl}</span>
+            <span onClick={(event) => event.stopPropagation()}>
+              <CopyButton text={post.pageUrl} compact />
+            </span>
+          </div>
+        </div>
+      </article>
+    </div>
+  );
+});
 
 export function GalleryListTable({
   rows,
@@ -220,89 +410,37 @@ export function GalleryListTable({
   onToggleAll: () => void;
   onOpen: (id: string) => void;
 }) {
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <table className="w-full min-w-[720px] text-left text-sm">
-        <thead className="border-b border-slate-100 text-xs font-medium text-slate-500 dark:border-slate-800">
-          <tr>
-            <th className="w-10 px-3 py-3">
-              <input type="checkbox" checked={allSelected} onChange={onToggleAll} aria-label="Hepsini seç" />
-            </th>
-            <SortHead label="Önizleme" dir={sort.key === "name" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "name"))} />
-            <th className="px-2 py-3">Durum</th>
-            {showOwner ? <th className="px-2 py-3">Kim</th> : null}
-            <th className="px-2 py-3">Etiket</th>
-            <SortHead label="Tarih" dir={sort.key === "date" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "date"))} />
-            <th className="px-2 py-3">Link</th>
-            <SortHead label="Tür" dir={sort.key === "type" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "type"))} />
-            <SortHead label="Boyut" dir={sort.key === "size" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "size"))} />
-            {showViews ? (
-              <SortHead
-                label="Görüntülenme"
-                dir={sort.key === "views" ? sort.dir : undefined}
-                onClick={() => onSort(toggleSort(sort, "views"))}
-              />
-            ) : null}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((post) => (
-            <tr key={post.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-              <td className="px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(post.id)}
-                  onChange={() => onToggle(post.id)}
-                  aria-label="Seç"
-                />
-              </td>
-              <td className="px-3 py-2">
-                <button
-                  type="button"
-                  onClick={() => onOpen(post.id)}
-                  className={`h-24 w-24 overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-800 ${
-                    post.hiddenAt || post.deletedAt ? "opacity-50" : ""
-                  }`}
-                >
-                  <GalleryThumb type={post.type} src={post.src} />
-                </button>
-              </td>
-              <td className="px-2 py-2 text-slate-500">
-                <span className="block">{statusText(post)}</span>
-                {post.passwordHash ? <span className="text-xs text-violet-600">Şifreli</span> : null}
-              </td>
-              {showOwner ? <td className="px-2 py-2">{post.owner ?? "Misafir"}</td> : null}
-              <td className="px-2 py-2">
-                <div className="flex max-w-[12rem] flex-wrap gap-1">
-                  {post.tags.length === 0 ? <span className="text-slate-400">—</span> : null}
-                  {post.tags.slice(0, 3).map((tag) => (
-                    <span key={tag} className="rounded-full bg-violet-50 px-1.5 py-0.5 text-[11px] text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
-                      #{tag}
-                    </span>
-                  ))}
-                  {post.tags.length > 3 ? <span className="text-[11px] text-slate-400">+{post.tags.length - 3}</span> : null}
-                </div>
-              </td>
-              <td className="whitespace-nowrap px-2 py-2 text-slate-600 dark:text-slate-300">{formatWhen(post.createdAt)}</td>
-              <td className="px-2 py-2">
-                <div className="flex min-w-0 max-w-[280px] items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onOpen(post.id)}
-                    className="min-w-0 truncate text-left text-sky-600 hover:underline"
-                  >
-                    {post.pageUrl}
-                  </button>
-                  <CopyButton text={post.pageUrl} compact />
-                </div>
-              </td>
-              <td className="px-2 py-2">{typeLabel(post.type)}</td>
-              <td className="whitespace-nowrap px-2 py-2">{formatBytes(post.size)}</td>
-              {showViews ? <td className="whitespace-nowrap px-2 py-2">{post.views ?? 0}</td> : null}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
+        <input type="checkbox" checked={allSelected} onChange={onToggleAll} aria-label="Hepsini seç" />
+        <SortHead label="Ad" dir={sort.key === "name" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "name"))} />
+        <SortHead label="Tarih" dir={sort.key === "date" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "date"))} />
+        <SortHead label="Tür" dir={sort.key === "type" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "type"))} />
+        <SortHead label="Boyut" dir={sort.key === "size" ? sort.dir : undefined} onClick={() => onSort(toggleSort(sort, "size"))} />
+        {showViews ? (
+          <SortHead
+            label="Görüntülenme"
+            dir={sort.key === "views" ? sort.dir : undefined}
+            onClick={() => onSort(toggleSort(sort, "views"))}
+          />
+        ) : null}
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {rows.map((post, index) => (
+          <GalleryCard
+            key={post.id}
+            post={post}
+            checked={selectedSet.has(post.id)}
+            showOwner={showOwner}
+            showViews={showViews}
+            eagerThumb={post.type === "image" && index < 32}
+            onToggle={onToggle}
+            onOpen={onOpen}
+          />
+        ))}
+      </div>
     </div>
   );
 }

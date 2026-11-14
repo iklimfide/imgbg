@@ -78,13 +78,22 @@ export function HeaderMenu({
             {signedIn ? (
               <>
                 {isAdmin ? (
-                  <Link
-                    href="/admin"
-                    onClick={() => setOpen(false)}
-                    className="flex min-h-11 items-center rounded-xl px-3 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Yönetim
-                  </Link>
+                  <>
+                    <Link
+                      href="/admin"
+                      onClick={() => setOpen(false)}
+                      className="flex min-h-11 items-center rounded-xl px-3 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      Yönetim
+                    </Link>
+                    <Link
+                      href="/admin/kullanicilar"
+                      onClick={() => setOpen(false)}
+                      className="flex min-h-11 items-center rounded-xl px-3 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      Kullanıcılar
+                    </Link>
+                  </>
                 ) : null}
                 <Link
                   href="/profil"
