@@ -8,6 +8,7 @@ import { ErrorModal } from "@/components/ErrorModal";
 import { LinkAddModal } from "@/components/LinkAddModal";
 import { ShareSuccessModal, type ShareResult } from "@/components/ShareSuccessModal";
 import { UploadProgressModal } from "@/components/UploadProgressModal";
+import { parseHttpUrls } from "@/lib/http-urls";
 import { fileLimit, formatMb, ttlOptionsFor } from "@/lib/quota";
 import { normalizeHttpUrl, readSeenLinks, rememberSeenLinks } from "@/lib/seen-links";
 import { MEDIA_CACHE_CONTROL, type MediaKind } from "@/lib/site";
@@ -262,6 +263,70 @@ export function UploadPanel({
     setTtl(readSavedTtl(initialKind, member));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [member]);
+
+  useEffect(() => {
+    function filesFromClipboard(data: DataTransfer | null) {
+      if (!data) {
+        return [] as File[];
+      }
+      const fromList = Array.from(data.files ?? []);
+      if (fromList.length) {
+        return fromList;
+      }
+      const fromItems: File[] = [];
+      for (const item of Array.from(data.items ?? [])) {
+        if (item.kind !== "file") {
+          continue;
+        }
+        const file = item.getAsFile();
+        if (file) {
+          fromItems.push(file);
+        }
+      }
+      return fromItems;
+    }
+
+    function onPaste(event: ClipboardEvent) {
+      if (pending || fetchingUrl || kind === "audio" || linkOpen) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=true]")) {
+        return;
+      }
+      const files = filesFromClipboard(event.clipboardData);
+      const matching = files.filter((file) =>
+        kind === "image" ? file.type.startsWith("image/") : file.type.startsWith("video/"),
+      );
+      if (matching.length) {
+        event.preventDefault();
+        addFiles(matching);
+        return;
+      }
+      if (files.length) {
+        event.preventDefault();
+        setError(
+          kind === "image"
+            ? "Yapıştırılan dosya bir resim değil. Video ise Video yükle sekmesini kullan."
+            : "Yapıştırılan dosya bir video değil. Resim ise Resim yükle sekmesini kullan.",
+        );
+        return;
+      }
+      const urls = parseHttpUrls(event.clipboardData?.getData("text") ?? "");
+      if (!urls.length) {
+        return;
+      }
+      event.preventDefault();
+      void addFromUrls(urls).then((message) => {
+        if (message && !message.includes("zaten ekli")) {
+          setError(message);
+        }
+      });
+    }
+
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  });
 
   function revokeAll(list: QueueItem[]) {
     list.forEach((item) => URL.revokeObjectURL(item.preview));
@@ -752,9 +817,9 @@ export function UploadPanel({
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
                     {kind === "image"
-                      ? "birden fazla dosya seçebilirsin"
+                      ? "seç, sürükle veya yapıştır"
                       : admin
-                        ? "tek video"
+                        ? "tek video · seç veya yapıştır"
                         : `tek video, en fazla ${formatMb(fileLimit(member, "video"))} MB`}
                   </p>
                 </>

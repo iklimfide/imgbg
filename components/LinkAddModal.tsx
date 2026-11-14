@@ -99,7 +99,7 @@ export function LinkAddModal({
           {pending
             ? pendingNote || "Bağlantılar alınıyor."
             : videoOnly
-              ? "Tek bir Twitter/X veya mp4 bağlantısı yapıştır."
+              ? "Tek bir Twitter/X, Instagram, Facebook veya mp4 bağlantısı yapıştır."
               : "Birden fazla bağlantıyı alt alta veya yan yana yapıştır."}
         </p>
         {videoOnly ? (

@@ -219,8 +219,8 @@ async function fetchPublicBuffer(rawUrl: string, maxBytes: number, referer?: str
   throw new Error("Çok fazla yönlendirme.");
 }
 
-export async function inspectRemoteMedia(rawUrl: string, maxBytes: number) {
-  const first = await fetchPublicBuffer(rawUrl, maxBytes);
+export async function inspectRemoteMedia(rawUrl: string, maxBytes: number, referer?: string) {
+  const first = await fetchPublicBuffer(rawUrl, maxBytes, referer);
   const mime = sniffMime(first.buf, first.contentType);
   if (mime) {
     return {
@@ -263,6 +263,6 @@ export async function materializeRemoteMedia(
   return { buf: file.buf, mime: fileMime, url: file.url };
 }
 
-export async function downloadPublicMedia(rawUrl: string, maxBytes: number) {
-  return materializeRemoteMedia(await inspectRemoteMedia(rawUrl, maxBytes), maxBytes);
+export async function downloadPublicMedia(rawUrl: string, maxBytes: number, referer?: string) {
+  return materializeRemoteMedia(await inspectRemoteMedia(rawUrl, maxBytes, referer), maxBytes);
 }

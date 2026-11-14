@@ -6,6 +6,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { getSession } from "@/lib/session";
 import { ALLOWED_TYPES, parseMediaKind, type MediaKind } from "@/lib/site";
 import { guestKeyFromRequest } from "@/lib/posts";
+import { pickSocialVideo, resolveSocialMedia, socialKindFromUrl } from "@/lib/social-video";
 import { pickTwitterVideo, resolveTwitterMedia, tweetIdFromUrl } from "@/lib/twitter-media";
 
 export const maxDuration = 60;
@@ -38,6 +39,9 @@ export async function POST(request: Request) {
     if (tweetIdFromUrl(url)) {
       return await twitterResponse({ url, kind, maxBytes, userId: user?.id, guestKey });
     }
+    if (socialKindFromUrl(url)) {
+      return await socialResponse({ url, kind, maxBytes, userId: user?.id, guestKey });
+    }
     if (kind === "video") {
       const file = await downloadPublicMedia(url, maxBytes);
       return await fileResponse(file, kind, user?.id, guestKey);
@@ -65,6 +69,40 @@ export async function POST(request: Request) {
     }
     return Response.json({ error: message }, { status: 400 });
   }
+}
+
+async function socialResponse(params: {
+  url: string;
+  kind: MediaKind;
+  maxBytes: number;
+  userId?: string;
+  guestKey: string | null;
+}) {
+  const media = await resolveSocialMedia(params.url);
+  if (!media) {
+    return Response.json({ error: "Instagram veya Facebook bağlantısı okunamadı." }, { status: 400 });
+  }
+  const label = media.kind === "facebook" ? "Facebook" : "Instagram";
+  if (params.kind === "video") {
+    const pick = pickSocialVideo(media.videos);
+    if (!pick) {
+      return Response.json(
+        { error: `Bu gönderide video yok. Resim varsa Resim yükle sekmesinden dene.` },
+        { status: 400 },
+      );
+    }
+    const file = await downloadPublicMedia(pick.url, params.maxBytes, media.referer);
+    return fileResponse(file, "video", params.userId, params.guestKey);
+  }
+  const photo = media.photos[0];
+  if (!photo) {
+    return Response.json(
+      { error: `Bu ${label} gönderisinde resim yok. Video varsa Video yükle sekmesinden ekle.` },
+      { status: 400 },
+    );
+  }
+  const file = await downloadPublicMedia(photo, params.maxBytes, media.referer);
+  return fileResponse(file, "image", params.userId, params.guestKey);
 }
 
 async function twitterResponse(params: {
